@@ -3,7 +3,10 @@ package com.melancholicbastard.cobalt.data
 import android.Manifest
 import android.content.Context
 import android.content.pm.PackageManager
+import android.media.AudioFormat
+import android.media.AudioRecord
 import android.media.MediaCodec
+import android.media.MediaCodecInfo
 import android.media.MediaExtractor
 import android.media.MediaFormat
 import android.media.MediaMuxer
@@ -12,16 +15,28 @@ import android.os.Build
 import android.util.Log
 import androidx.core.content.ContextCompat
 import java.io.File
+import java.io.FileInputStream
+import java.io.FileOutputStream
 import java.io.IOException
+import java.io.RandomAccessFile
 import java.nio.ByteBuffer
+//import com.arthenica.mobileffmpeg.FFmpeg
+
 
 class AudioRecorder(private val context: Context) {
-    // Хранит текущий экземпляр MediaRecorder для записи аудио
-    private var mediaRecorder: MediaRecorder? = null
+    // Хранит текущий экземпляр AudioRecord для записи аудио
+    private var audioRecord: AudioRecord? = null
     // Файл, в который идет запись в данный момент
     private var outputFile: File? = null
+    private var isRecording = false
     // Список временных файлов для хранения фрагментов на устройствах с API < 24 (до Android 7)
     private var pausedFiles = mutableListOf<File>()
+    // Конфигурация аудио для Vosk
+    private val sampleRate = 16000
+    private val channelConfig = AudioFormat.CHANNEL_IN_MONO
+    private val audioFormat = AudioFormat.ENCODING_PCM_16BIT
+    // Для потока записи
+    private var recordingThread: Thread? = null
 
     /**
      * Проверяет, есть ли у приложения разрешение на запись звука
@@ -44,21 +59,41 @@ class AudioRecorder(private val context: Context) {
             throw SecurityException("Audio recording permission not granted")
         }
 
-        // Создаем временный файл для записи
-        val newFile = File.createTempFile("audio_", ".mp4", context.cacheDir).apply {
-            createNewFile()
-        }
+        val bufferSize = AudioRecord.getMinBufferSize(
+            sampleRate,
+            channelConfig,
+            audioFormat
+        ) * 2
 
+        val newFile = File.createTempFile("audio_", ".wav", context.cacheDir)
         outputFile = newFile
-        mediaRecorder = MediaRecorder().apply {
-            setAudioSource(MediaRecorder.AudioSource.MIC)       // Источник - микрофон
-            setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)  // Формат - MPEG-4
-            setAudioEncoder(MediaRecorder.AudioEncoder.AAC)     // Кодек - AAC
-            setOutputFile(newFile.absolutePath)                 // Путь к файлу
-            setAudioEncodingBitRate(128000)                     // 128 kbps для лучшего качества
-            prepare()
-            start()
-        }
+
+        audioRecord = AudioRecord(
+            MediaRecorder.AudioSource.MIC,
+            sampleRate,
+            channelConfig,
+            audioFormat,
+            bufferSize
+        )
+
+        isRecording = true
+        audioRecord?.startRecording()
+
+        recordingThread = Thread {
+            writeWavHeader(newFile) // Записываем заголовок WAV
+            val buffer = ByteArray(bufferSize)
+            val fos = FileOutputStream(newFile, true)
+
+            while (isRecording) {
+                val bytesRead = audioRecord?.read(buffer, 0, bufferSize) ?: 0
+                if (bytesRead > 0) {
+                    fos.write(buffer, 0, bytesRead)
+                }
+            }
+
+            fos.close()
+        }.apply { start() }
+
         return newFile
     }
 
@@ -69,26 +104,98 @@ class AudioRecorder(private val context: Context) {
      */
     fun pauseRecording() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-            mediaRecorder?.pause()
+            isRecording = false
         } else {
-            stopRecording()
+            stopInternal()
             outputFile?.let { pausedFiles.add(it) }
             outputFile = null
-            mediaRecorder = null
         }
     }
 
     /**
-     * Возобновляет запись
+     * Возобновляет приостановленную запись
      * @return файл, в который продолжается запись
+     * @throws IllegalStateException если запись не была приостановлена
      */
+    @Throws(IllegalStateException::class)
     fun resumeRecording(): File {
+        if (outputFile == null) {
+            throw IllegalStateException("No paused recording to resume")
+        }
+
         return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-            mediaRecorder?.resume()
+            // Для API 24+ просто продолжаем запись в тот же файл
+            isRecording = true
+            audioRecord?.apply {
+                // Создаем новый поток записи
+                startRecordingThread()
+            } ?: throw IllegalStateException("AudioRecord not initialized")
             outputFile!!
         } else {
-            // Создаём новый файл для продолжения записи
+            // Для старых версий начинаем новую запись
             startRecording()
+        }
+    }
+
+    private fun startRecordingThread() {
+        recordingThread?.interrupt()
+        recordingThread = Thread {
+            val fos = FileOutputStream(outputFile, true) // Открываем файл в режиме дописывания
+
+            val bufferSize = AudioRecord.getMinBufferSize(
+                sampleRate,
+                channelConfig,
+                audioFormat
+            )
+            val buffer = ByteArray(bufferSize)
+
+            while (isRecording) {
+                val bytesRead = audioRecord?.read(buffer, 0, bufferSize) ?: 0
+                if (bytesRead > 0) {
+                    fos.write(buffer, 0, bytesRead)
+                }
+            }
+
+            fos.close()
+        }.apply { start() }
+    }
+
+    /**
+     * Записывает WAV-заголовок в указанный файл
+     *
+     * @param file Файл для записи заголовка
+     * @param sampleRate Частота дискретизации (по умолчанию 16000 Гц)
+     * @param channels Количество каналов (1 - моно, 2 - стерео)
+     * @param bitsPerSample Битность (16 бит для PCM)
+     */
+    private fun writeWavHeader(
+        file: File,
+        sampleRate: Int = 16000,
+        channels: Int = 1,
+        bitsPerSample: Int = 16
+    ) {
+        val byteRate = sampleRate * channels * bitsPerSample / 8
+        val blockAlign = channels * bitsPerSample / 8
+
+        RandomAccessFile(file, "rw").use { raf ->
+            // RIFF header
+            raf.write("RIFF".toByteArray())          // Chunk ID
+            raf.writeInt(0)                          // Chunk size (пока 0, обновится позже)
+            raf.write("WAVE".toByteArray())          // Format
+
+            // Format sub-chunk
+            raf.write("fmt ".toByteArray())          // Subchunk ID
+            raf.writeInt(16)                         // Subchunk size (16 для PCM)
+            raf.writeShort(1)                        // Audio format (1 = PCM)
+            raf.writeShort(channels)       // Channels
+            raf.writeInt(sampleRate)                 // Sample rate
+            raf.writeInt(byteRate)                   // Byte rate
+            raf.writeShort(blockAlign)     // Block align
+            raf.writeShort(bitsPerSample)  // Bits per sample
+
+            // Data sub-chunk
+            raf.write("data".toByteArray())          // Subchunk ID
+            raf.writeInt(0)                          // Data size (пока 0)
         }
     }
 
@@ -96,128 +203,272 @@ class AudioRecorder(private val context: Context) {
      * Останавливает запись и объединяет фрагменты для старых устройств
      * @return итоговый файл с полной записью
      */
-    fun stopRecording(): File? {
-        mediaRecorder?.apply {
-            try {
-                stop()
-            } catch (e: IllegalStateException) {
-                Log.e("AudioRecorder", "stop() failed", e)
+    fun stopRecording(): ProcessedAudio? {
+        stopInternal()
+
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N || pausedFiles.isEmpty()) {
+            // Новые Android или нет пауз - обрабатываем текущий WAV
+            outputFile?.let { wavFile ->
+                // 1. Распознавание текста
+//                val text = recognizeAudio(wavFile)
+                val text = "РЕкогнизед текст" // Заглушка
+                // 2. Конвертация в AAC/MP4
+                val mp4File = convertToAac(wavFile)
+                // 3. Удаление временного WAV
+                wavFile.delete()
+                ProcessedAudio(mp4File, text)
             }
+        } else {
+            // Старые Android с паузами - особый случай
+            processLegacyRecording()
+        }
+    }
+
+    private fun stopInternal() {
+        isRecording = false
+        recordingThread?.join(2000)
+        audioRecord?.apply {
+            stop()
             release()
         }
-        mediaRecorder = null
-
-        // Для старых API объединяем все фрагменты
-        if (pausedFiles.isNotEmpty() && outputFile != null) {
-            pausedFiles.add(outputFile!!)
-            outputFile = mergeAudioFiles(pausedFiles)
-            pausedFiles.clear()
+        audioRecord = null
+        // Обновляем заголовок только если файл существует и содержит данные
+        outputFile?.let { file ->
+            if (file.exists() && file.length() >= 44) {
+                try {
+                    updateWavHeader(file)
+                } catch (e: IOException) {
+                    Log.e("AudioRecorder", "Не удалось обновить заголовок: ${e.message}")
+                    file.delete()
+                    outputFile = null
+                }
+            } else {
+                Log.w("AudioRecorder", "Файл слишком маленький для WAV-заголовка, удаляем: ${file.absolutePath}")
+                file.delete()
+                outputFile = null
+            }
         }
-        return outputFile
     }
 
     /**
-     * Объединяет несколько аудиофайлов в один
+     * Обновляет заголовок WAV-файла, устанавливая корректные размеры данных.
+     *
+     * @param file WAV-файл для обновления
+     * @throws IOException если файл не существует или не является валидным WAV-файлом
+     */
+    @Throws(IOException::class)
+    private fun updateWavHeader(file: File) {
+        if (!file.exists() || file.length() < 44) {
+            throw IOException("Invalid WAV file: ${file.absolutePath}")
+        }
+
+        val fileSize = file.length()
+        val dataSize = fileSize - 44  // 44 байта - размер стандартного WAV-заголовка
+
+        RandomAccessFile(file, "rw").use { raf ->
+            // 1. Обновляем общий размер файла (ChunkSize) в позиции 4
+            // Формат: RIFF[4] + ChunkSize[4] + WAVE[4] + ...
+            raf.seek(4)
+            raf.writeInt((fileSize - 8).toInt())  // 8 = RIFF(4) + ChunkSize(4)
+
+            // 2. Обновляем размер аудиоданных (Subchunk2Size) в позиции 40
+            // Формат: ... + data[4] + Subchunk2Size[4] + данные
+            raf.seek(40)
+            raf.writeInt(dataSize.toInt())
+        }
+    }
+
+    @Throws(IOException::class)
+    private fun convertToAac(wavFile: File): File {
+        if (!wavFile.exists()) {
+            throw IOException("WAV файл не найден: ${wavFile.absolutePath}")
+        }
+
+        val outputFile = File.createTempFile("converted_", ".mp4", context.cacheDir)
+        val inputStream = FileInputStream(wavFile).apply { skip(44) } // Пропускаем заголовок WAV
+        val muxer = MediaMuxer(outputFile.absolutePath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
+
+        // Настройка формата AAC
+        val format = MediaFormat.createAudioFormat(MediaFormat.MIMETYPE_AUDIO_AAC, 16000, 1).apply {
+            setInteger(MediaFormat.KEY_BIT_RATE, 128000)
+            setInteger(MediaFormat.KEY_AAC_PROFILE, MediaCodecInfo.CodecProfileLevel.AACObjectLC)
+            setInteger(MediaFormat.KEY_MAX_INPUT_SIZE, 16384)
+        }
+
+        val codec = MediaCodec.createEncoderByType(MediaFormat.MIMETYPE_AUDIO_AAC).apply {
+            configure(format, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
+            start()
+        }
+
+        val inputBuffers = codec.inputBuffers
+        val outputBuffers = codec.outputBuffers
+        val bufferInfo = MediaCodec.BufferInfo()
+        var trackAdded = false
+        var presentationTimeUs = 0L
+
+        try {
+            val chunkSize = 1024
+            val pcmBuffer = ByteArray(chunkSize)
+            var isEndOfStream = false
+            var totalBytesRead = 0L
+
+            while (!isEndOfStream) {
+                val inputBufferIndex = codec.dequeueInputBuffer(10000)
+                if (inputBufferIndex >= 0) {
+                    val inputBuffer = inputBuffers[inputBufferIndex]
+                    inputBuffer.clear()
+
+                    val bytesRead = inputStream.read(pcmBuffer)
+                    if (bytesRead == -1) {
+                        // Завершаем ввод
+                        codec.queueInputBuffer(
+                            inputBufferIndex,
+                            0, 0,
+                            presentationTimeUs,
+                            MediaCodec.BUFFER_FLAG_END_OF_STREAM
+                        )
+                        isEndOfStream = true
+                    } else {
+                        inputBuffer.put(pcmBuffer, 0, bytesRead)
+                        codec.queueInputBuffer(
+                            inputBufferIndex,
+                            0, bytesRead,
+                            presentationTimeUs,
+                            0
+                        )
+                        // Обновляем время в микросекундах
+                        // 16-битный PCM, моно → 2 байта на семпл, 16000 семплов в секунде
+                        presentationTimeUs += (bytesRead / 2 * 1000000L / 16000)
+                        totalBytesRead += bytesRead
+                    }
+                }
+
+                // Обрабатываем выходные буферы
+                while (true) {
+                    val outputBufferIndex = codec.dequeueOutputBuffer(bufferInfo, 10000)
+                    if (outputBufferIndex < 0) break
+
+                    if (!trackAdded) {
+                        muxer.addTrack(codec.outputFormat)
+                        muxer.start()
+                        trackAdded = true
+                    }
+
+                    val outputBuffer = outputBuffers[outputBufferIndex]
+                    outputBuffer.position(bufferInfo.offset)
+                    outputBuffer.limit(bufferInfo.offset + bufferInfo.size)
+
+                    val outData = ByteArray(bufferInfo.size).apply {
+                        outputBuffer.get(this)
+                    }
+
+                    if (bufferInfo.size > 0) {
+                        muxer.writeSampleData(0, ByteBuffer.wrap(outData), bufferInfo)
+                    }
+
+                    codec.releaseOutputBuffer(outputBufferIndex, false)
+
+                    if ((bufferInfo.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0) {
+                        break
+                    }
+                }
+
+                if (isEndOfStream) break
+            }
+
+            // После окончания ввода — обрабатываем оставшиеся выходные буферы
+            while (true) {
+                val outputBufferIndex = codec.dequeueOutputBuffer(bufferInfo, 10000)
+                if (outputBufferIndex < 0) break
+
+                if (!trackAdded) {
+                    muxer.addTrack(codec.outputFormat)
+                    muxer.start()
+                    trackAdded = true
+                }
+
+                val outputBuffer = outputBuffers[outputBufferIndex]
+                outputBuffer.position(bufferInfo.offset)
+                outputBuffer.limit(bufferInfo.offset + bufferInfo.size)
+
+                val outData = ByteArray(bufferInfo.size).apply {
+                    outputBuffer.get(this)
+                }
+
+                if (bufferInfo.size > 0) {
+                    muxer.writeSampleData(0, ByteBuffer.wrap(outData), bufferInfo)
+                }
+
+                codec.releaseOutputBuffer(outputBufferIndex, false)
+
+                if ((bufferInfo.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0) {
+                    break
+                }
+            }
+
+            // Завершаем работу
+            muxer.stop()
+            muxer.release()
+            inputStream.close()
+            codec.stop()
+            codec.release()
+
+            return outputFile
+
+        } catch (e: Exception) {
+            // Очистка при ошибке
+            muxer.stop()
+            muxer.release()
+            inputStream.close()
+            codec.stop()
+            codec.release()
+            outputFile.delete()
+            throw IOException("Ошибка кодирования в AAC: ${e.message}")
+        }
+    }
+
+    private fun processLegacyRecording(): ProcessedAudio {
+        // 1. Объединяем WAV-фрагменты
+        val mergedWav = mergeWavFiles(pausedFiles + outputFile!!)
+
+        // 2. Распознаем текст из объединенного WAV
+//        val text = recognizeAudio(mergedWav)
+        val text = "РЕкогнизед текст" // Заглушка
+
+        // 3. Конвертируем в AAC/MP4
+        val mp4File = convertToAac(mergedWav)
+
+        // 4. Очистка
+        pausedFiles.forEach { it.delete() }
+        mergedWav.delete()
+        pausedFiles.clear()
+
+        return ProcessedAudio(mp4File, text)
+    }
+
+    /**
+     * Объединяет несколько WAV-аудиофайлов в один
      * @param files список файлов для объединения
      * @return итоговой файл с объединенной записью
      */
-    private fun mergeAudioFiles(files: List<File>): File {if (files.isEmpty()) throw IllegalArgumentException("No files to merge")
-        // Создаем временный файл для результата
-        val mergedFile = File.createTempFile("merged_", ".mp4", context.cacheDir)
-        // Инициализируем MediaMuxer для объединения файлов
-        val muxer = MediaMuxer(mergedFile.absolutePath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
-        var audioTrackIndex = -1
-        var sampleRate = -1
-        var channelCount = -1
-        var totalDuration = 0L
-        val buffer = ByteBuffer.allocate(1024 * 1024) // Буфер 1MB для чтения данных
+    private fun mergeWavFiles(files: List<File>): File {
+        val mergedFile = File.createTempFile("merged_", ".wav", context.cacheDir)
 
-        try {
-            // 1. Сначала проходим по всем файлам для проверки совместимости
+        // Простое объединение RAW PCM данных
+        FileOutputStream(mergedFile).use { out ->
             files.forEach { file ->
-                MediaExtractor().apply {
-                    setDataSource(file.absolutePath)
-                    // Ищем аудиотрек в файле
-                    (0 until trackCount).forEach { i ->
-                        if (getTrackFormat(i).getString(MediaFormat.KEY_MIME)?.startsWith("audio/") == true) {
-                            if (audioTrackIndex == -1) {
-                                // Берем параметры первого файла как эталонные
-                                val format = getTrackFormat(i)
-                                sampleRate = format.getInteger(MediaFormat.KEY_SAMPLE_RATE)
-                                channelCount = format.getInteger(MediaFormat.KEY_CHANNEL_COUNT)
-                                audioTrackIndex = muxer.addTrack(format)
-                                muxer.start()
-                            }
-                            release()
-                            return@forEach
-                        }
+                FileInputStream(file).use { input ->
+                    if (file != files.first()) {
+                        input.skip(44) // Пропускаем заголовок у всех кроме первого
                     }
-                    release()
+                    input.copyTo(out)
                 }
             }
-
-            // 2. Обрабатываем каждый файл и объединяем их
-            files.forEach { file ->
-                MediaExtractor().apply {
-                    setDataSource(file.absolutePath)
-
-                    // Находим аудиотрек
-                    val trackIndex = selectTrackWithMimeType("audio/")
-                    if (trackIndex >= 0) {
-                        val format = getTrackFormat(trackIndex)
-                        selectTrack(trackIndex)
-
-                        // Проверяем совместимость параметров
-                        if (format.getInteger(MediaFormat.KEY_SAMPLE_RATE) != sampleRate ||
-                            format.getInteger(MediaFormat.KEY_CHANNEL_COUNT) != channelCount) {
-                            throw IOException("Incompatible audio formats")
-                        }
-                        val duration = format.getLong(MediaFormat.KEY_DURATION)
-                        // Читаем и записываем данные
-                        while (true) {
-                            val bufferInfo = MediaCodec.BufferInfo()
-                            val sampleSize = readSampleData(buffer, 0)
-                            if (sampleSize < 0) break
-
-                            // Устанавливаем временную метку
-                            bufferInfo.presentationTimeUs = totalDuration + sampleTime
-                            // Преобразуем флаги MediaExtractor в MediaCodec-совместимые
-                            bufferInfo.flags = when {
-                                (sampleFlags and MediaExtractor.SAMPLE_FLAG_SYNC) != 0 ->
-                                    MediaCodec.BUFFER_FLAG_KEY_FRAME
-                                else -> 0
-                            }
-                            bufferInfo.size = sampleSize
-
-                            muxer.writeSampleData(audioTrackIndex, buffer, bufferInfo)
-                            advance()
-                        }
-
-                        totalDuration += duration
-                    }
-                    release()
-                }
-            }
-        } finally {
-            // Освобождаем ресурсы
-            muxer.stop()
-            muxer.release()
         }
 
+        // Обновляем заголовок
+        updateWavHeader(mergedFile)
         return mergedFile
-    }
-
-    /**
-     * Вспомогательный метод для поиска аудиотрека в файле
-     */
-    private fun MediaExtractor.selectTrackWithMimeType(mimePrefix: String): Int {
-        for (i in 0 until trackCount) {
-            val format = getTrackFormat(i)
-            if (format.getString(MediaFormat.KEY_MIME)?.startsWith(mimePrefix) == true) {
-                return i
-            }
-        }
-        return -1
     }
 
     /**
@@ -230,4 +481,9 @@ class AudioRecorder(private val context: Context) {
         outputFile = null
         pausedFiles.clear()
     }
+
+    data class ProcessedAudio(
+        val audioFile: File,
+        val transcript: String
+    )
 }
