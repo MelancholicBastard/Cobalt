@@ -37,6 +37,17 @@ class AudioRecorder(private val context: Context) {
     private val audioFormat = AudioFormat.ENCODING_PCM_16BIT
     // Для потока записи
     private var recordingThread: Thread? = null
+    // Vosk модель
+    private var speechRecognizer: AudioSpeechRecognizer? = null
+
+    init {
+        resetSpeechRecognizer()
+    }
+
+    private fun resetSpeechRecognizer() {
+        speechRecognizer?.release() // Освобождаем старые ресурсы
+        speechRecognizer = AudioSpeechRecognizer(context)
+    }
 
     /**
      * Проверяет, есть ли у приложения разрешение на запись звука
@@ -209,14 +220,26 @@ class AudioRecorder(private val context: Context) {
         return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N || pausedFiles.isEmpty()) {
             // Новые Android или нет пауз - обрабатываем текущий WAV
             outputFile?.let { wavFile ->
-                // 1. Распознавание текста
-//                val text = recognizeAudio(wavFile)
-                val text = "РЕкогнизед текст" // Заглушка
-                // 2. Конвертация в AAC/MP4
-                val mp4File = convertToAac(wavFile)
-                // 3. Удаление временного WAV
-                wavFile.delete()
-                ProcessedAudio(mp4File, text)
+                try {
+                    val recognizer = speechRecognizer ?: throw IllegalStateException("Recognizer not initialized")
+                    // 1. Распознавание текста
+                    val text = recognizer.recognizeAudio(wavFile) ?: "Ошибка распознавания"
+//                    val text = "Рекгнизед текст"
+                    Log.d("Text", text)
+                    // 2. Конвертация в AAC/MP4
+                    val mp4File = convertToAac(wavFile)
+                    // 3. Удаление временного WAV
+                    wavFile.delete()
+
+                    // Пересоздаем распознаватель для следующего использования
+                    resetSpeechRecognizer()
+
+                    ProcessedAudio(mp4File, text)
+                } catch (e: Exception) {
+                    Log.e("AudioRecorder", "Ошибка при обработке файла", e)
+                    speechRecognizer?.release()
+                    null
+                }
             }
         } else {
             // Старые Android с паузами - особый случай
@@ -428,12 +451,13 @@ class AudioRecorder(private val context: Context) {
     }
 
     private fun processLegacyRecording(): ProcessedAudio {
+        val recognizer = speechRecognizer ?: throw IllegalStateException("Recognizer not initialized")
         // 1. Объединяем WAV-фрагменты
         val mergedWav = mergeWavFiles(pausedFiles + outputFile!!)
 
         // 2. Распознаем текст из объединенного WAV
-//        val text = recognizeAudio(mergedWav)
-        val text = "РЕкогнизед текст" // Заглушка
+        val text = recognizer.recognizeAudio(mergedWav) ?: "Ошибка распознавания"
+//        val text = "Рекгнизед текст"
 
         // 3. Конвертируем в AAC/MP4
         val mp4File = convertToAac(mergedWav)
@@ -442,6 +466,7 @@ class AudioRecorder(private val context: Context) {
         pausedFiles.forEach { it.delete() }
         mergedWav.delete()
         pausedFiles.clear()
+        resetSpeechRecognizer()
 
         return ProcessedAudio(mp4File, text)
     }
@@ -480,6 +505,7 @@ class AudioRecorder(private val context: Context) {
         pausedFiles.forEach { it.delete() }
         outputFile = null
         pausedFiles.clear()
+        resetSpeechRecognizer()
     }
 
     data class ProcessedAudio(

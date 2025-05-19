@@ -83,7 +83,7 @@ fun BottomNavigationBar(navController: NavController) {
 }
 
 sealed class Screen(val route: String) {                                            // enum маршрутов
-    object Record : Screen("record")
-    object History : Screen("history")
-    object Settings : Screen("settings")
+    data object Record : Screen("record")
+    data object History : Screen("history")
+    data object Settings : Screen("settings")
 }

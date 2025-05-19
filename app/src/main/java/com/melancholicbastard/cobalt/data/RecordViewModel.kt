@@ -103,9 +103,10 @@ class RecordViewModel(application: Application) : AndroidViewModel(application) 
             withContext(Dispatchers.Main) {
                 if (result != null) {
                     audioFile = result.audioFile
+
                     _textFromAudioFile.value = result.transcript
 
-                    _playbackDuration.value = getAudioDurationFrom(result.audioFile!!)
+                    _playbackDuration.value = getAudioDurationFrom(result.audioFile)
 
                     recordingState = RecordingState.STOPPED
                     stopTimer()
@@ -149,9 +150,7 @@ class RecordViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     private fun pausePlayback() {
-        mediaPlayer?.let {
-            it.pause()
-        }
+        mediaPlayer?.pause()
         _isPlaying.value = false
         playbackJob?.cancel()
     }
