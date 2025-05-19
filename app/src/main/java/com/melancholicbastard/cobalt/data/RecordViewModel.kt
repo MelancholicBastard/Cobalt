@@ -7,6 +7,7 @@ import android.os.SystemClock
 import android.util.Log
 import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.AndroidViewModel
@@ -29,8 +30,11 @@ import java.io.IOException
 class RecordViewModelFactory(
     private val application: Application
 ) : ViewModelProvider.Factory {
+    @Suppress("UNCHECKED_CAST")
     override fun <T : ViewModel> create(modelClass: Class<T>): T {
-        return RecordViewModel(application) as T
+        if (modelClass.isAssignableFrom(RecordViewModel::class.java))
+            return RecordViewModel(application) as T
+        throw IllegalArgumentException("Unknown ViewModel class")
     }
 }
 
@@ -44,7 +48,7 @@ class RecordViewModel(application: Application) : AndroidViewModel(application) 
     // Состояния UI
     var recordingState by mutableStateOf(RecordingState.IDLE)
         private set
-    var elapsedTime by mutableStateOf(0L)
+    var elapsedTime by mutableLongStateOf(0L)
         private set
     var permissionNeeded = mutableStateOf(false)
         private set
@@ -61,6 +65,10 @@ class RecordViewModel(application: Application) : AndroidViewModel(application) 
     val playbackDuration: StateFlow<Long> = _playbackDuration
     private var _isPlaying = mutableStateOf(false)
     val isPlaying: MutableState<Boolean> = _isPlaying
+
+    init {
+        VoskModelManager.initialize(application)
+    }
 
     fun startRecording() {
         viewModelScope.launch(Dispatchers.IO) {

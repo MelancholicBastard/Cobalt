@@ -7,7 +7,6 @@ import android.media.AudioFormat
 import android.media.AudioRecord
 import android.media.MediaCodec
 import android.media.MediaCodecInfo
-import android.media.MediaExtractor
 import android.media.MediaFormat
 import android.media.MediaMuxer
 import android.media.MediaRecorder
@@ -37,17 +36,6 @@ class AudioRecorder(private val context: Context) {
     private val audioFormat = AudioFormat.ENCODING_PCM_16BIT
     // Для потока записи
     private var recordingThread: Thread? = null
-    // Vosk модель
-    private var speechRecognizer: AudioSpeechRecognizer? = null
-
-    init {
-        resetSpeechRecognizer()
-    }
-
-    private fun resetSpeechRecognizer() {
-        speechRecognizer?.release() // Освобождаем старые ресурсы
-        speechRecognizer = AudioSpeechRecognizer(context)
-    }
 
     /**
      * Проверяет, есть ли у приложения разрешение на запись звука
@@ -221,23 +209,17 @@ class AudioRecorder(private val context: Context) {
             // Новые Android или нет пауз - обрабатываем текущий WAV
             outputFile?.let { wavFile ->
                 try {
-                    val recognizer = speechRecognizer ?: throw IllegalStateException("Recognizer not initialized")
                     // 1. Распознавание текста
-                    val text = recognizer.recognizeAudio(wavFile) ?: "Ошибка распознавания"
-//                    val text = "Рекгнизед текст"
+                    val text = VoskModelManager.recognizeAudio(wavFile) ?: "Ошибка распознавания"
                     Log.d("Text", text)
                     // 2. Конвертация в AAC/MP4
                     val mp4File = convertToAac(wavFile)
                     // 3. Удаление временного WAV
                     wavFile.delete()
 
-                    // Пересоздаем распознаватель для следующего использования
-                    resetSpeechRecognizer()
-
                     ProcessedAudio(mp4File, text)
                 } catch (e: Exception) {
                     Log.e("AudioRecorder", "Ошибка при обработке файла", e)
-                    speechRecognizer?.release()
                     null
                 }
             }
@@ -395,8 +377,6 @@ class AudioRecorder(private val context: Context) {
                         break
                     }
                 }
-
-                if (isEndOfStream) break
             }
 
             // После окончания ввода — обрабатываем оставшиеся выходные буферы
@@ -451,13 +431,11 @@ class AudioRecorder(private val context: Context) {
     }
 
     private fun processLegacyRecording(): ProcessedAudio {
-        val recognizer = speechRecognizer ?: throw IllegalStateException("Recognizer not initialized")
         // 1. Объединяем WAV-фрагменты
         val mergedWav = mergeWavFiles(pausedFiles + outputFile!!)
 
         // 2. Распознаем текст из объединенного WAV
-        val text = recognizer.recognizeAudio(mergedWav) ?: "Ошибка распознавания"
-//        val text = "Рекгнизед текст"
+        val text = VoskModelManager.recognizeAudio(mergedWav) ?: "Ошибка распознавания"
 
         // 3. Конвертируем в AAC/MP4
         val mp4File = convertToAac(mergedWav)
@@ -466,7 +444,6 @@ class AudioRecorder(private val context: Context) {
         pausedFiles.forEach { it.delete() }
         mergedWav.delete()
         pausedFiles.clear()
-        resetSpeechRecognizer()
 
         return ProcessedAudio(mp4File, text)
     }
@@ -505,7 +482,6 @@ class AudioRecorder(private val context: Context) {
         pausedFiles.forEach { it.delete() }
         outputFile = null
         pausedFiles.clear()
-        resetSpeechRecognizer()
     }
 
     data class ProcessedAudio(

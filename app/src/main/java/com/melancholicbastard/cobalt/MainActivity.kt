@@ -11,12 +11,14 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.tooling.preview.Preview
+import com.melancholicbastard.cobalt.data.VoskModelManager
 import com.melancholicbastard.cobalt.navigation.AppNavigation
 import com.melancholicbastard.cobalt.ui.theme.CobaltTheme
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        VoskModelManager.initialize(applicationContext)
         enableEdgeToEdge()
         setContent {
             CobaltTheme {
@@ -29,5 +31,11 @@ class MainActivity : ComponentActivity() {
 //                }
             }
         }
+    }
+    override fun onDestroy() {
+        if (isFinishing) {
+            VoskModelManager.release()
+        }
+        super.onDestroy()
     }
 }

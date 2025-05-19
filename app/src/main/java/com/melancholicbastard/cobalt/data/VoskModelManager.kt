@@ -1,10 +1,8 @@
 package com.melancholicbastard.cobalt.data
 
 import android.content.Context
-import android.speech.SpeechRecognizer
 import android.util.Log
 import org.json.JSONObject
-import org.vosk.android.SpeechService
 import org.vosk.Model
 import org.vosk.Recognizer
 import java.io.FileInputStream
@@ -13,90 +11,77 @@ import java.io.FileOutputStream
 import java.io.IOException
 import java.nio.ByteBuffer
 
-class AudioSpeechRecognizer(private val context: Context) {
-    private val modelPath = "vosk-model-small-ru-0.22"
+object VoskModelManager {
+    private const val MODEL_PATH = "vosk-model-small-ru-0.22"
     private var model: Model? = null
+    private var modelDir: File? = null
 
-    init {
-        initializeModel()
-    }
+    @Synchronized
+    fun initialize(context: Context) {
+        if (model != null) return
 
-    private fun initializeModel() {
-        if (model == null) {
-            val modelsDir = context.getDir("models", Context.MODE_PRIVATE)
-            val modelDir = File(modelsDir, modelPath).apply {
+        val modelsDir = context.getDir("models", Context.MODE_PRIVATE)
+        modelDir = File(modelsDir, MODEL_PATH).apply {
+            // Копируем только при первом запуске или повреждении модели
+            if (!exists() || !isModelValid()) {
                 deleteRecursively()
                 mkdirs()
-            }
-
-            Log.d("Vosk", "Model path: ${modelDir.absolutePath}")
-
-            try {
-                // Копируем модель
-                context.extractModelAssets(modelPath, modelDir)
-
-                // Проверяем обязательные файлы
-                val requiredFiles = listOf(
-                    "am/final.mdl",
-                    "graph/HCLr.fst",
-                    "vosk-model-small-ru-0.22.ini"
-                )
-
-                requiredFiles.forEach { file ->
-                    if (!File(modelDir, file).exists()) {
-                        throw IOException("Missing required model file: $file")
-                    }
-                }
-
-                model = Model(modelDir.absolutePath)
-                Log.d("Vosk", "Model successfully loaded")
-
-            } catch (e: Exception) {
-                Log.e("Vosk", "Model initialization failed", e)
-                throw RuntimeException("Failed to load model", e)
+                context.extractModelAssets(MODEL_PATH, this)
             }
         }
+
+        model = Model(modelDir!!.absolutePath)
     }
 
+    private fun File.isModelValid(): Boolean {
+        val requiredFiles = listOf(
+            "am/final.mdl",
+            "graph/HCLr.fst",
+            "$MODEL_PATH.ini"
+        )
+        return requiredFiles.all { File(this, it).exists() }
+    }
+
+    @Synchronized
     fun recognizeAudio(file: File): String? {
-        initializeModel() // Гарантируем инициализацию
-        if (!isWavValidForVosk(file)) {
+        if (!isWavValidForVosk(file)){
             Log.e("Vosk", "Invalid WAV file format")
             return null
         }
 
-        return model?.let { loadedModel ->
-            try {
+        return try {
+            model?.let { loadedModel ->
                 Recognizer(loadedModel, 16000.0f).use { recognizer ->
-                    FileInputStream(file).use { input ->
-                        input.skip(44)
-                        val buffer = ByteArray(4096)
-                        var bytesRead: Int
-
-                        while (input.read(buffer).also { bytesRead = it } != -1) {
-                            if (bytesRead > 0) {
-                                recognizer.acceptWaveForm(buffer, bytesRead)
-                            }
-                        }
-
-                        JSONObject(recognizer.finalResult)
-                            .optString("text", "")
-                            .trim()
-                            .takeIf { it.isNotEmpty() }
-                    }
+                    processAudioFile(file, recognizer)
                 }
-            } catch (e: Exception) {
-                Log.e("Vosk", "Recognition error", e)
-                null
             }
+        } catch (e: Exception) {
+            Log.e("Vosk", "Recognition error: ${e.stackTraceToString()}")
+            null
         }
     }
 
-    fun release() {
-        model?.close()
-        Log.d("Vosk", "Resources released")
+    private fun processAudioFile(file: File, recognizer: Recognizer): String {
+        FileInputStream(file).use { input ->
+            input.skip(44)
+            val buffer = ByteArray(4096)
+            var bytesRead: Int
+
+            while (input.read(buffer).also { bytesRead = it } != -1) {
+                if (bytesRead > 0) recognizer.acceptWaveForm(buffer, bytesRead)
+            }
+        }
+        return JSONObject(recognizer.finalResult)
+            .optString("text", "")
+            .trim()
+            .takeIf { it.isNotEmpty() } ?: ""
     }
 
+    @Synchronized
+    fun release() {
+        model?.close()
+        model = null
+    }
 
     private fun Context.extractModelAssets(assetDir: String, targetDir: File) {
         targetDir.deleteRecursively()
@@ -155,5 +140,4 @@ class AudioSpeechRecognizer(private val context: Context) {
         }
     }
 }
-
 
