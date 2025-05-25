@@ -11,6 +11,7 @@ import android.media.MediaFormat
 import android.media.MediaMuxer
 import android.media.MediaRecorder
 import android.os.Build
+import android.os.Environment
 import android.util.Log
 import androidx.core.content.ContextCompat
 import java.io.File
@@ -289,7 +290,15 @@ class AudioRecorder(private val context: Context) {
             throw IOException("WAV файл не найден: ${wavFile.absolutePath}")
         }
 
-        val outputFile = File.createTempFile("converted_", ".mp4", context.cacheDir)
+        val outputDir = context.getExternalFilesDir(Environment.DIRECTORY_MUSIC)
+            ?: context.filesDir
+        val outputFile = File(outputDir, "converted_${System.currentTimeMillis()}.mp4")
+
+        if (!outputFile.exists()) {
+            outputFile.createNewFile()
+        }
+
+//        val outputFile = File.createTempFile("converted_", ".mp4", context.cacheDir)
         val inputStream = FileInputStream(wavFile).apply { skip(44) } // Пропускаем заголовок WAV
         val muxer = MediaMuxer(outputFile.absolutePath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
 

@@ -11,15 +11,19 @@ import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.AndroidViewModel
-import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
+import com.melancholicbastard.cobalt.db.VoiceNote
+import com.melancholicbastard.cobalt.db.VoiceNoteDB
+import com.melancholicbastard.cobalt.db.VoiceNoteRepository
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -65,6 +69,13 @@ class RecordViewModel(application: Application) : AndroidViewModel(application) 
     val playbackDuration: StateFlow<Long> = _playbackDuration
     private var _isPlaying = mutableStateOf(false)
     val isPlaying: MutableState<Boolean> = _isPlaying
+
+    // Репозиторий
+    private val repository: VoiceNoteRepository = VoiceNoteRepository(
+        VoiceNoteDB.getDB(application).voiceNoteDAO()
+    )
+    private val _recordSavedEvent = MutableSharedFlow<Unit>()
+    val recordSavedEvent = _recordSavedEvent.asSharedFlow()
 
     init {
         VoskModelManager.initialize(application)
@@ -190,7 +201,6 @@ class RecordViewModel(application: Application) : AndroidViewModel(application) 
                     mediaPlayer!!.start()
                 }
             }
-
             _isPlaying.value = true
         }
         // Запускаем обновление позиции
@@ -245,9 +255,23 @@ class RecordViewModel(application: Application) : AndroidViewModel(application) 
         _textFromAudioFile.value = newText
     }
 
-    fun saveToDatabase(text: String) {
-        // TODO: Реализовать сохранение в Room / Firebase / файлы
-        Log.d("RecordViewModel", "Сохраняю в базу: $text")
+    fun saveToDatabase(title: String) {
+        val audioFile = this.audioFile ?: return // Проверяем, что аудиофайл существует
+
+        val note = VoiceNote(
+            id = System.currentTimeMillis(),
+            title = title,
+            dateCreated = System.currentTimeMillis(),
+            audioPath = audioFile.absolutePath,
+            transcript = textFromAudioFile.value
+        )
+
+        viewModelScope.launch(Dispatchers.IO) {
+            repository.insert(note)
+            _recordSavedEvent.emit(Unit)
+        }
+
+        Log.d("RecordViewModel", "Сохраняю запись: $title, путь: ${audioFile.absolutePath}")
     }
 
     private fun startTimer() {

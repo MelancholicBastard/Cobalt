@@ -10,11 +10,11 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
@@ -22,6 +22,8 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Done
@@ -30,16 +32,17 @@ import androidx.compose.material.icons.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.List
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextField
+import androidx.compose.material3.TextFieldColors
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -56,15 +59,19 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.melancholicbastard.cobalt.data.RecordViewModel
 import com.melancholicbastard.cobalt.data.RecordViewModelFactory
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.mutableLongStateOf
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.input.TextFieldValue
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.coroutineScope
-import kotlinx.coroutines.withContext
+import androidx.compose.ui.unit.max
+import androidx.navigation.NavController
+import com.melancholicbastard.cobalt.navigation.Screen
 
 
 @Composable
-fun RecordScreen(
+    fun RecordScreen(
+    navController: NavController,
     viewModel: RecordViewModel = viewModel(
         factory = RecordViewModelFactory(
             LocalContext.current.applicationContext as Application
@@ -84,6 +91,13 @@ fun RecordScreen(
         if (viewModel.permissionNeeded.value) {
             permissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
             viewModel.permissionNeeded.value = false
+        }
+        viewModel.recordSavedEvent.collect {
+            // Переход на HistoryScreen
+            navController.navigate(Screen.History.route) {
+                popUpTo(Screen.Record.route) { inclusive = true }
+                launchSingleTop = true
+            }
         }
     }
 
@@ -117,7 +131,6 @@ fun LoadingState() {
         Text("Обработка...")
     }
 }
-
 
 @Composable
 private fun IdleState(viewModel: RecordViewModel) {
@@ -206,134 +219,163 @@ private fun PausedState(viewModel: RecordViewModel) {
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun StoppedState(viewModel: RecordViewModel) {
     val playbackPosition by viewModel.playbackPosition.collectAsState()
     val playbackDuration by remember { derivedStateOf { viewModel.playbackDuration.value } }
-    var totalDuration by remember { mutableStateOf(0L) }
+    var totalDuration by remember { mutableLongStateOf(0L) }
+    var recordingTitle by remember { mutableStateOf(TextFieldValue("")) }
+
+    val colors = TextFieldDefaults.textFieldColors(
+        focusedIndicatorColor = Color.Transparent,
+        unfocusedIndicatorColor = Color.Transparent,
+        disabledIndicatorColor = Color.Transparent,
+        containerColor = MaterialTheme.colorScheme.surfaceBright
+    )
+    val shape = RoundedCornerShape(
+        topStart = 8.dp,
+        topEnd = 8.dp,
+        bottomStart = 8.dp,
+        bottomEnd = 8.dp
+    )
 
     // Обновляем длительность при каждом изменении playbackDuration
     LaunchedEffect(playbackDuration) {
         totalDuration = playbackDuration
     }
 
-    Column(
+    OutlinedTextField(
+        value = recordingTitle,
+        onValueChange = { newText ->
+            if (newText.text.length <= 50 && !newText.text.contains("\n")) {
+                recordingTitle = newText
+            } },
         modifier = Modifier
-            .fillMaxSize()
-            .padding(8.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Top
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 8.dp)
+            .border(3.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(8.dp)),
+        singleLine = true,
+        placeholder = {
+            if (recordingTitle.text.isBlank()) {
+                Text(text = "Новая запись")
+            } },
+        textStyle = MaterialTheme.typography.titleMedium,
+        colors = colors,
+        shape = shape,)
+
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(MaterialTheme.colorScheme.surface)
+            .border(3.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(8.dp))
+            .padding(16.dp)
     ) {
-        Text(text = "Запись завершена",
-            style = MaterialTheme.typography.titleMedium,
-            modifier = Modifier
-                .padding(bottom = 16.dp)
-        )
-
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .background(MaterialTheme.colorScheme.surface)
-                .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(8.dp))
-                .padding(16.dp)
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center
         ) {
-            Column(
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.Center
-            ) {
-                Text(
-                    text = "Время: ${formatPlayingTimer(playbackPosition)} / ${formatPlayingTimer(totalDuration)}",
-                    modifier = Modifier.padding(bottom = 8.dp)
+            Text(
+                text = "Время: ${formatPlayingTimer(playbackPosition)} / ${formatPlayingTimer(totalDuration)}",
+                modifier = Modifier.padding(bottom = 8.dp)
+            )
+            // Только если аудио готово к воспроизведению
+            if (totalDuration > 0) {
+                val progress by remember {
+                    derivedStateOf {
+                        playbackPosition / totalDuration.toFloat()
+                    }
+                }
+                Slider(
+                    value = progress,
+                    onValueChange = { newProgress ->
+                        val newPosition = (newProgress * totalDuration).toLong()
+                        viewModel.seekTo(newPosition) },
+                    valueRange = 0f..1f,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp)
                 )
-                // Только если аудио готово к воспроизведению
-                if (totalDuration > 0) {
-                    val progress by remember {
-                        derivedStateOf {
-                            playbackPosition / totalDuration.toFloat()
-                        }
-                    }
-                    Slider(
-                        value = progress,
-                        onValueChange = { newProgress ->
-                            val newPosition = (newProgress * totalDuration).toLong()
-                            viewModel.seekTo(newPosition)
-                        },
-                        valueRange = 0f..1f,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 16.dp)
+            } else {
+                Text(text = "Файл не готов к воспроизведению")
+            }
+
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(16.dp),
+                modifier = Modifier.padding(8.dp)
+            ) {
+                // 1. Перемотка -5 сек
+                IconButton(onClick = { viewModel.fastBackward() }) {
+                    Icon(Icons.AutoMirrored.Filled.KeyboardArrowLeft, contentDescription = "Назад")
+                }
+
+                // 2. Воспроизвести
+                IconButton(onClick = { viewModel.togglePlayback() }) {
+                    Icon(
+                        imageVector = if (viewModel.isPlaying.value) Icons.Default.List else Icons.Default.PlayArrow,
+                        contentDescription = if (viewModel.isPlaying.value) "Пауза" else "Проиграть"
                     )
-                } else {
-                    Text(text = "Файл не готов к воспроизведению")
-
                 }
 
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(16.dp),
-                    modifier = Modifier.padding(8.dp)
-                ) {
-                    // 1. Перемотка -5 сек
-                    IconButton(onClick = { viewModel.fastBackward() }) {
-                        Icon(Icons.Default.KeyboardArrowLeft, contentDescription = "Назад")
-                    }
-
-                    // 2. Воспроизвести
-                    IconButton(onClick = { viewModel.togglePlayback() }) {
-                        Icon(
-                            imageVector = if (viewModel.isPlaying.value) Icons.Default.List else Icons.Default.PlayArrow,
-                            contentDescription = if (viewModel.isPlaying.value) "Пауза" else "Проиграть"
-                        )
-                    }
-
-                    // 3. Перемотка +5 сек
-                    IconButton(onClick = { viewModel.fastForward() }) {
-                        Icon(Icons.Default.KeyboardArrowRight, contentDescription = "Вперёд")
-                    }
+                // 3. Перемотка +5 сек
+                IconButton(onClick = { viewModel.fastForward() }) {
+                    Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = "Вперёд")
                 }
-            }
-
-        }
-
-        Row(
-            horizontalArrangement = Arrangement.spacedBy(16.dp),
-            modifier = Modifier.padding(16.dp)
-        ) {
-            Button(
-                onClick = {
-                    viewModel.stopPlayback()
-                    viewModel.cancelRecording()
-                }
-            ) {
-                Text("Новая запись")
-            }
-
-            Button(
-                onClick = { },
-                enabled = !viewModel.isPlaying.value
-            ) {
-                Text("Сохранить запись")
             }
         }
-        // Редактор транскрипции
-        TranscribedTextEditor(viewModel = viewModel)
     }
+
+    Row(horizontalArrangement = Arrangement.spacedBy(16.dp), modifier = Modifier.padding(16.dp)) {
+        Button(
+            onClick = {
+            viewModel.stopPlayback()
+            viewModel.cancelRecording() }
+        ) {
+            Text("Новая запись")
+        }
+
+        Button(
+            onClick = {
+            val title = if (recordingTitle.text.isBlank()) "Новая запись" else recordingTitle.text
+            viewModel.saveToDatabase( title ) },
+            enabled = !viewModel.isPlaying.value
+        ) {
+            Text("Сохранить запись")
+        }
+    }
+        // Редактор транскрипции
+        TranscribedTextEditor(viewModel = viewModel, colors, shape)
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun TranscribedTextEditor(viewModel: RecordViewModel) {
+private fun TranscribedTextEditor(
+    viewModel: RecordViewModel,
+    colors: TextFieldColors = TextFieldDefaults.textFieldColors(
+        focusedIndicatorColor = Color.Transparent,
+        unfocusedIndicatorColor = Color.Transparent,
+        disabledIndicatorColor = Color.Transparent,
+        containerColor = MaterialTheme.colorScheme.surfaceBright
+    ),
+    shape: RoundedCornerShape = RoundedCornerShape(
+        topStart = 8.dp,
+        topEnd = 8.dp,
+        bottomStart = 8.dp,
+        bottomEnd = 8.dp
+    )
+) {
     val textFromViewModel by viewModel.textFromAudioFile.collectAsState()
-    var textFieldValue by remember {
-        mutableStateOf(TextFieldValue(textFromViewModel))
-    }
+    var textFieldValue by remember { mutableStateOf(TextFieldValue(textFromViewModel)) }
+    val scrollState = rememberScrollState()
+    val keyboardController = LocalSoftwareKeyboardController.current
+    val imeInsets = WindowInsets.ime.asPaddingValues()
 
     Column(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(bottom = max(imeInsets.calculateBottomPadding() - 75.dp, 0.dp)),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-
-
-
         Row(
             horizontalArrangement = Arrangement.spacedBy(16.dp),
             verticalAlignment = Alignment.CenterVertically,
@@ -341,41 +383,52 @@ private fun TranscribedTextEditor(viewModel: RecordViewModel) {
         ) {
             Text("Распознанный текст", style = MaterialTheme.typography.titleSmall)
 
-            Button(
-                onClick = {
-                    viewModel.updateTranscribedText(textFieldValue.text)
-                },
-                enabled = textFromViewModel != textFieldValue.text
+            IconButton(
+                onClick = { viewModel.updateTranscribedText(textFieldValue.text) },
+                enabled = textFromViewModel != textFieldValue.text,
+                modifier = Modifier.size(60.dp)
             ) {
-                Text("Сохранить текст")
+                Icon(
+                    imageVector = Icons.Default.Done,
+                    contentDescription = "Save",
+                    modifier = Modifier.size(36.dp)
+                )
+            }
+            IconButton(
+                onClick = { textFieldValue = TextFieldValue(textFromViewModel) },
+                enabled = textFromViewModel != textFieldValue.text,
+                modifier = Modifier.size(60.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Refresh,
+                    contentDescription = "ReturnBack",
+                    modifier = Modifier.size(36.dp)
+                )
             }
         }
 
-        val scrollState = rememberScrollState()
-        val colors = TextFieldDefaults.textFieldColors(
-            focusedIndicatorColor = Color.Transparent,
-            unfocusedIndicatorColor = Color.Transparent,
-            disabledIndicatorColor = Color.Transparent,
-            containerColor = MaterialTheme.colorScheme.surfaceBright
-        )
         Box(
             modifier = Modifier
-                .fillMaxHeight(0.5f)
+                .weight(1f)
                 .background(MaterialTheme.colorScheme.surfaceBright)
                 .border(3.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(8.dp))
                 .verticalScroll(scrollState)
         ) {
-            TextField(
+            OutlinedTextField(
                 value = textFieldValue,
-                onValueChange = {
-                    textFieldValue = it
-                },
+                onValueChange = { textFieldValue = it },
                 modifier = Modifier
                     .fillMaxSize()
+                    .onFocusChanged { focusState ->
+                        if (focusState.isFocused) {
+                            keyboardController?.show() // Показываем клавиатуру
+                        }
+                    }
                     .background(MaterialTheme.colorScheme.surfaceBright),
                 maxLines = Int.MAX_VALUE,
                 textStyle = MaterialTheme.typography.bodyLarge,
                 colors = colors,
+                shape = shape,
                 singleLine = false
             )
         }
@@ -404,7 +457,7 @@ private fun RecordingTimer(milliseconds: Long) {
     )
 }
 
-private fun formatPlayingTimer(millis: Long): String {
+fun formatPlayingTimer(millis: Long): String {
     val minutes = millis / 1000 / 60
     val seconds = (millis / 1000) % 60
     return String.format("%02d:%02d", minutes, seconds)

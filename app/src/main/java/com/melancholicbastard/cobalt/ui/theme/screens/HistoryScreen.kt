@@ -1,5 +1,8 @@
 package com.melancholicbastard.cobalt.ui.theme.screens
 
+import android.app.Application
+import androidx.activity.OnBackPressedCallback
+import androidx.activity.compose.LocalOnBackPressedDispatcherOwner
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
@@ -8,40 +11,68 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.livedata.observeAsState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.navigation.NavController
+import com.melancholicbastard.cobalt.data.HistoryViewModel
+import com.melancholicbastard.cobalt.data.HistoryViewModelFactory
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 
 @Composable
-fun HistoryScreen(viewModel: HistoryViewModel = viewModel()) {
-    val notes by viewModel.notes.collectAsState()
-    Column(
-        modifier = Modifier.fillMaxSize(),
-        verticalArrangement = Arrangement.Center,
-        horizontalAlignment = Alignment.CenterHorizontally
-    ) {
-        Text("История записей", style = MaterialTheme.typography.headlineMedium)
+fun HistoryScreen(
+    navController: NavController,
+    viewModel: HistoryViewModel = viewModel(
+        factory = HistoryViewModelFactory(
+            LocalContext.current.applicationContext as Application)
+    )
+) {
+    val screenState by viewModel.screenState.collectAsState()
+    // Обработка кнопки "Назад"
+    val backDispatcher = LocalOnBackPressedDispatcherOwner.current?.onBackPressedDispatcher
 
-        LazyColumn {
-            items(notes) { note ->
-                Text("Запись от ${note.date}")
+    DisposableEffect(Unit) {
+        val callback = object : OnBackPressedCallback(true) {
+            override fun handleOnBackPressed() {
+                when (screenState) {
+                    is HistoryViewModel.HistoryScreenState.Edit -> {
+                        viewModel.exitEditMode()
+                    }
+                    HistoryViewModel.HistoryScreenState.DeleteConfirm -> {
+                        viewModel.exitSelectionMode()
+                    }
+                    HistoryViewModel.HistoryScreenState.Search -> {
+                        // Выход с экрана
+                        navController.popBackStack()
+                    }
+                }
             }
         }
+        backDispatcher?.addCallback(callback)
+        onDispose {
+            callback.remove()
+        }
     }
-}
 
-class HistoryViewModel : ViewModel() {
-    private val _notes = MutableStateFlow(listOf(
-        Note(date = "12.05.2023"),
-        Note(date = "11.05.2023")
-    ))
-    val notes: StateFlow<List<Note>> = _notes
+    when (screenState) {
+        is HistoryViewModel.HistoryScreenState.Search -> {
+            SearchModeScreen(viewModel)
+        }
+        is HistoryViewModel.HistoryScreenState.Edit -> {
+            val noteId = (screenState as HistoryViewModel.HistoryScreenState.Edit).noteId
+            EditModeScreen(viewModel, noteId)
+        }
 
-    data class Note(val date: String)
+        is HistoryViewModel.HistoryScreenState.DeleteConfirm -> {
+            SearchModeScreen(viewModel)
+        }
+    }
 }
 

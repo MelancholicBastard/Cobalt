@@ -22,6 +22,7 @@ fun NavGraph(
         // Экран записи аудио
         composable(Screen.Record.route) {
             RecordScreen(
+                navController = navController
 //                onNavigateToHistory = {
 //                    navController.navigate(Screen.History.route)
 //                }
@@ -30,7 +31,9 @@ fun NavGraph(
 
         // Экран истории записей
         composable(Screen.History.route) {
-            HistoryScreen()
+            HistoryScreen(
+                navController = navController
+            )
         }
 
         // Экран настроек
