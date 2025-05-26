@@ -149,10 +149,21 @@ class RecordViewModel(application: Application) : BasePlaybackViewModel(applicat
         }
     }
 
-
     override fun playRecording() {
         audioFile?.let { file ->
             setDataSource(file)
+            startPlayback()
+        }
+    }
+
+    // Новый метод для явного запуска воспроизведения
+    private fun startPlayback() {
+        mediaPlayer?.let { player ->
+            if (!player.isPlaying) {
+                player.start()
+                isPlaying.value = true
+                startPlaybackProgressTracking()
+            }
         }
     }
 

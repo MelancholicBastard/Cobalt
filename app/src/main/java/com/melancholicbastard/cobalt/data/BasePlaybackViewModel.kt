@@ -15,6 +15,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.IOException
@@ -26,6 +28,8 @@ abstract class BasePlaybackViewModel(application: Application) : AndroidViewMode
 
     protected var playbackJob: Job? = null
         private set
+
+    private var isPrepared = false
 
     // Состояния для UI
     val isPlaying = mutableStateOf(false)
@@ -49,17 +53,17 @@ abstract class BasePlaybackViewModel(application: Application) : AndroidViewMode
     fun stopPlayback() {
         Log.d("BasePlaybackViewModel", "stopPlayback()")
         mediaPlayer?.apply {
-            if (isPlaying) {
-                pause()
-                stop()
-            }
+            pause()
+            stop()
             release()
         }
         mediaPlayer = null
         isPlaying.value = false
         playbackJob?.cancel()
         playbackJob = null
-        (playbackPosition as MutableStateFlow).value = 0L
+        _playbackPosition.value = 0L
+        isPrepared = false
+        Log.d("BasePlaybackViewModel", "В stopPlayback isPrepared == $isPrepared")
     }
 
     fun seekTo(positionMs: Long) {
@@ -84,47 +88,41 @@ abstract class BasePlaybackViewModel(application: Application) : AndroidViewMode
         }
     }
 
-    fun setDataSource(file: File) {
-        Log.d("BasePlaybackViewModel", "setDataSource(${file.name})")
-        if (mediaPlayer == null) {
-            mediaPlayer?.apply {
-                stop()
-                release()
-            }
-            mediaPlayer = null
-            isPlaying.value = false
-            playbackJob?.cancel()
+    // Блокировка для thread-safe операций
+    private val lock = Any()
 
-            mediaPlayer = MediaPlayer().apply {
-                try {
-                    setDataSource(file.absolutePath)
-                    prepare()
-                    start()
-                    _playbackDuration.value = duration.toLong()
-                    _playbackPosition.value = 0L
-                    setOnCompletionListener {
-                        _playbackPosition.value = duration.toLong()
-                        this@BasePlaybackViewModel.isPlaying.value = false
-                    }
-                    this@BasePlaybackViewModel.isPlaying.value = true
-                } catch (e: IOException) {
-                    Log.e("RecordViewModel", "Ошибка подготовки медиаплеера: ${e.message}")
-                    mediaPlayer?.release()
-                    mediaPlayer = null
+    fun setDataSource(file: File) {
+        Log.d("BasePlaybackViewModel", "setDataSource вызван для ${file.name}")
+        if (isPrepared && mediaPlayer != null)
+        {
+            Log.d("BasePlaybackViewModel", "mediaPlayer подготовлен ${isPrepared}")
+            return // Уже подготовлен
+        }
+        stopPlayback() // Остановить предыдущий плеер
+        mediaPlayer = MediaPlayer().apply {
+            try {
+                setDataSource(file.absolutePath)
+                prepare() // Только подготовка, без start()
+                isPrepared = true
+                _playbackDuration.value = duration.toLong()
+                _playbackPosition.value = 0L
+                setOnCompletionListener {
+                    _playbackPosition.value = duration.toLong()
+                    this@BasePlaybackViewModel.isPlaying.value = false
                 }
-            }
-        } else {
-            if (!mediaPlayer!!.isPlaying) {
-                mediaPlayer!!.start()
+            } catch (e: IOException) {
+                Log.e("BasePlaybackViewModel", "Ошибка инициализации плеера", e)
+                release()
+                mediaPlayer = null
+                isPrepared = false
             }
         }
-        isPlaying.value = true
-        startPlaybackProgressTracking()
     }
 
     // Вспомогательные методы
     protected fun startPlaybackProgressTracking() {
         Log.d("BasePlaybackViewModel", "startPlaybackProgressTracking()")
+        playbackJob?.cancel()
         playbackJob = viewModelScope.launch {
             while (mediaPlayer?.isPlaying == true) {
                 (playbackPosition as MutableStateFlow).value = mediaPlayer!!.currentPosition.toLong() ?: 0L
@@ -143,5 +141,9 @@ abstract class BasePlaybackViewModel(application: Application) : AndroidViewMode
             Log.e("BasePlaybackViewModel", "Ошибка получения длительности: ${e.message}")
             0L
         }
+    }
+    override fun onCleared() {
+        stopPlayback()
+        super.onCleared()
     }
 }

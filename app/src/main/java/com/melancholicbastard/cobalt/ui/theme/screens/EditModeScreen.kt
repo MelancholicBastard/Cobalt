@@ -71,7 +71,7 @@ import com.melancholicbastard.cobalt.data.RecordViewModel
     // Состояния из ViewModel через StateFlow
     val currentNote by viewModel.currentNote.collectAsState()
     val editingTitle by viewModel.editingTitle.collectAsState()
-    val editingTranscript by viewModel.editingTranscript.collectAsState()
+//    val editingTranscript by viewModel.editingTranscript.collectAsState()
     val playbackPosition by viewModel.playbackPosition.collectAsState()
     val playbackDuration by viewModel.playbackDuration.collectAsState()
     val screenState by viewModel.screenState.collectAsState()
@@ -82,17 +82,14 @@ import com.melancholicbastard.cobalt.data.RecordViewModel
         disabledIndicatorColor = Color.Transparent,
         containerColor = MaterialTheme.colorScheme.surfaceBright
     )
-    val shape = RoundedCornerShape(
-        topStart = 8.dp,
-        topEnd = 8.dp,
-        bottomStart = 8.dp,
-        bottomEnd = 8.dp
-    )
+    val shape = RoundedCornerShape(8.dp)
 
     // Загружаем заметку при первом входе в режим
     LaunchedEffect(noteId) {
         Log.d("EditModeScreen", "Загрузка записи с ID: $noteId")
-        viewModel.loadNoteById(noteId)
+        if (currentNote?.id != noteId) {
+            viewModel.loadNoteById(noteId)
+        }
     }
 
     DisposableEffect(Unit) {
@@ -105,7 +102,9 @@ import com.melancholicbastard.cobalt.data.RecordViewModel
         }
         backDispatcher?.addCallback(callback)
         onDispose {
-            viewModel.exitEditMode()
+            if (viewModel.isPlaying.value) {
+                viewModel.stopPlayback()
+            }
             callback.remove()
         }
     }
@@ -237,30 +236,6 @@ import com.melancholicbastard.cobalt.data.RecordViewModel
 
                 // Редактор транскрипции
                 TranscribedTextEditor(viewModel = viewModel)
-
-                Spacer(modifier = Modifier.height(16.dp))
-
-                // Кнопки сохранения и выхода
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(16.dp),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Button(
-                        onClick = {
-                            viewModel.saveCurrentNote()
-                        },
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        Text("Сохранить изменения")
-                    }
-
-                    Button(
-                        onClick = { viewModel.exitEditMode() },
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        Text("Закрыть")
-                    }
-                }
             }
         }
 

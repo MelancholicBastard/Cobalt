@@ -10,9 +10,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
 import java.io.File
 
-class VoiceNoteRepository(
-    private val dao: VoiceNoteDAO
-) {
+class VoiceNoteRepository(private val dao: VoiceNoteDAO) {
     // Получить все записи (опционально)
     val allNotes: LiveData<List<VoiceNote>> = dao.getAll()
 

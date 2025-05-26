@@ -1,5 +1,6 @@
 package com.melancholicbastard.cobalt.data
 
+import android.annotation.SuppressLint
 import android.app.Application
 import android.icu.util.Calendar
 import android.media.MediaPlayer
@@ -16,6 +17,7 @@ import com.melancholicbastard.cobalt.db.VoiceNoteDB
 import com.melancholicbastard.cobalt.db.VoiceNoteRepository
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.cancelChildren
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -59,8 +61,10 @@ class HistoryViewModel(application: Application) : BasePlaybackViewModel(applica
     fun exitEditMode() {
         Log.d("HistoryViewModel", "exitEditMode()")
         _screenState.value = HistoryScreenState.Search
+        _currentNote.value = null
         resetEditState()
         stopPlayback()
+        viewModelScope.coroutineContext.cancelChildren() // Отменяем все корутины (краеугольный камень без которого ничего работать не будет)
     }
 
     // Календарь и фильтрация по дате
@@ -170,19 +174,21 @@ class HistoryViewModel(application: Application) : BasePlaybackViewModel(applica
     fun saveCurrentNote() {
         Log.d("HistoryViewModel", "Попытка сохранения записи")
         viewModelScope.launch {
-            val currentNote = _currentNote.value ?: run {
-                Log.e("HistoryViewModel", "saveCurrentNote: currentNote равен null")
-                return@launch
+            try {
+                val currentNote = _currentNote.value ?: return@launch
+                Log.d("HistoryViewModel", "saveCurrentNote: currentNote не равен null")
+                val updatedNote = currentNote.copy(
+                    title = _editingTitle.value,
+                    transcript = _editingTranscript.value
+                )
+                Log.d("HistoryViewModel", "Сохранение изменённой записи: $updatedNote")
+                repository.update(updatedNote).also {
+                    stopPlayback() // Ждём завершения update()
+                }
+                exitEditMode()
+            } catch (e: Exception) {
+                Log.e("HistoryViewModel", "Ошибка сохранения: ${e.message}")
             }
-            val updatedNote = currentNote.copy(
-                title = _editingTitle.value,
-                transcript = _editingTranscript.value
-            )
-            Log.d("HistoryViewModel", "Сохранение изменённой записи: $updatedNote")
-            withContext(Dispatchers.IO) {
-                repository.update(updatedNote)
-            }
-            exitEditMode()
         }
     }
 
@@ -211,7 +217,9 @@ class HistoryViewModel(application: Application) : BasePlaybackViewModel(applica
     }
 
     // Воспроизведение аудио
+    @SuppressLint("SuspiciousIndentation")
     override fun playRecording() {
+        Log.d("HistoryViewModel", "Запуск playRecording")
         val noteId = _currentNote.value?.id ?: return
         Log.d("HistoryViewModel", "Попытка воспроизведения для ID: $noteId")
         viewModelScope.launch(Dispatchers.IO) {
@@ -219,7 +227,11 @@ class HistoryViewModel(application: Application) : BasePlaybackViewModel(applica
                 note?.let {
                     val file = File(it.audioPath!!)
                     if (file.exists()) {
-                        setDataSource(file)
+                        if (mediaPlayer == null || !isPlaying.value)
+                            setDataSource(file)
+                            mediaPlayer?.start() // Явный запуск только здесь!
+                            isPlaying.value = true
+                            startPlaybackProgressTracking()
                     } else {
                         Log.e("HistoryViewModel", "Файл не найден: ${file.path}")
                     }
