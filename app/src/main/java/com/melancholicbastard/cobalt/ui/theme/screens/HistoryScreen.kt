@@ -1,6 +1,7 @@
 package com.melancholicbastard.cobalt.ui.theme.screens
 
 import android.app.Application
+import android.util.Log
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.compose.LocalOnBackPressedDispatcherOwner
 import androidx.compose.foundation.layout.Arrangement
@@ -35,12 +36,14 @@ fun HistoryScreen(
     )
 ) {
     val screenState by viewModel.screenState.collectAsState()
+    Log.d("HistoryScreen", "Текущее состояние: $screenState")
     // Обработка кнопки "Назад"
     val backDispatcher = LocalOnBackPressedDispatcherOwner.current?.onBackPressedDispatcher
 
     DisposableEffect(Unit) {
         val callback = object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
+                Log.d("HistoryScreen", "Нажатие 'назад', текущее состояние: $screenState")
                 when (screenState) {
                     is HistoryViewModel.HistoryScreenState.Edit -> {
                         viewModel.exitEditMode()
@@ -57,9 +60,11 @@ fun HistoryScreen(
         }
         backDispatcher?.addCallback(callback)
         onDispose {
+            Log.d("HistoryScreen", "DisposableEffect.onDispose()")
             callback.remove()
         }
     }
+
 
     when (screenState) {
         is HistoryViewModel.HistoryScreenState.Search -> {

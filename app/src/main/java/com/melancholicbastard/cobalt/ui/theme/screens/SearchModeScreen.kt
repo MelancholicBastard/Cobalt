@@ -76,13 +76,14 @@ fun SearchModeScreen(viewModel: HistoryViewModel) {
     val selectedIds by viewModel.selectedNoteIds.collectAsState()
 
     LaunchedEffect(selectedIds.size) {
+        Log.d("SearchModeScreen", "Состояние экрана изменено: $mode")
         if (selectedIds.isEmpty()) {
             viewModel.exitSelectionMode()
         }
     }
 
     Column(modifier = Modifier.fillMaxSize()) {
-        // === Шапка с кнопками ===
+        // Шапка с кнопками
         when (mode) {
             is HistoryViewModel.HistoryScreenState.Search -> {
                 // Стандартный интерфейс поиска и даты
@@ -263,7 +264,10 @@ fun SelectionTopBar(
             }
         },
         actions = {
-            IconButton(onClick = { deleteDialog = true }) {
+            IconButton(onClick = {
+                Log.d("EditModeScreen", "Кнопка 'Удалить' нажата")
+                deleteDialog = true
+            }) {
                 Icon(Icons.Default.Delete, contentDescription = "Удалить выбранные")
             }
         },
@@ -279,6 +283,7 @@ fun SelectionTopBar(
     if (deleteDialog) {
         DeleteConfirmationDialog(
             onConfirm = {
+                Log.d("EditModeScreen", "Кнопка 'Удалить' нажата")
                 onConfirm()
                 deleteDialog = false
             },
@@ -298,9 +303,6 @@ fun NoteCard(
     onLongClick: () -> Unit,
     onDelete: () -> Unit
 ) {
-    val time = remember(note.dateCreated) {
-        SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(note.dateCreated))
-    }
     var deleteDialog by remember { mutableStateOf(false) }
     Card(
         modifier = Modifier
@@ -319,7 +321,7 @@ fun NoteCard(
         ) {
             Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    text = time,
+                    text = formatTime(note.dateCreated),
                     style = MaterialTheme.typography.labelMedium
                 )
                 Text(

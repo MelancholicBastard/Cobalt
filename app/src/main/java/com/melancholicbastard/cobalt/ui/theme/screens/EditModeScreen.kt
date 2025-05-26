@@ -1,6 +1,8 @@
 package com.melancholicbastard.cobalt.ui.theme.screens
 
 import android.util.Log
+import androidx.activity.OnBackPressedCallback
+import androidx.activity.compose.LocalOnBackPressedDispatcherOwner
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
@@ -34,6 +36,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
@@ -41,6 +44,7 @@ import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldColors
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.derivedStateOf
@@ -62,18 +66,48 @@ import com.melancholicbastard.cobalt.data.RecordViewModel
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun EditModeScreen(viewModel: HistoryViewModel, noteId: Long) {
+    fun EditModeScreen(viewModel: HistoryViewModel, noteId: Long) {
+    val backDispatcher = LocalOnBackPressedDispatcherOwner.current?.onBackPressedDispatcher
     // Состояния из ViewModel через StateFlow
     val currentNote by viewModel.currentNote.collectAsState()
     val editingTitle by viewModel.editingTitle.collectAsState()
     val editingTranscript by viewModel.editingTranscript.collectAsState()
-    val isPlaying by viewModel.isPlaying.collectAsState()
     val playbackPosition by viewModel.playbackPosition.collectAsState()
     val playbackDuration by viewModel.playbackDuration.collectAsState()
+    val screenState by viewModel.screenState.collectAsState()
+
+    val colors = TextFieldDefaults.textFieldColors(
+        focusedIndicatorColor = Color.Transparent,
+        unfocusedIndicatorColor = Color.Transparent,
+        disabledIndicatorColor = Color.Transparent,
+        containerColor = MaterialTheme.colorScheme.surfaceBright
+    )
+    val shape = RoundedCornerShape(
+        topStart = 8.dp,
+        topEnd = 8.dp,
+        bottomStart = 8.dp,
+        bottomEnd = 8.dp
+    )
 
     // Загружаем заметку при первом входе в режим
     LaunchedEffect(noteId) {
+        Log.d("EditModeScreen", "Загрузка записи с ID: $noteId")
         viewModel.loadNoteById(noteId)
+    }
+
+    DisposableEffect(Unit) {
+        val callback = object : OnBackPressedCallback(true) {
+            override fun handleOnBackPressed() {
+                if (screenState is HistoryViewModel.HistoryScreenState.Edit) {
+                    viewModel.exitEditMode()
+                }
+            }
+        }
+        backDispatcher?.addCallback(callback)
+        onDispose {
+            viewModel.exitEditMode()
+            callback.remove()
+        }
     }
 
     // Редактирование заголовка
@@ -84,17 +118,25 @@ fun EditModeScreen(viewModel: HistoryViewModel, noteId: Long) {
             // Редактирование заголовка
             var title by remember { mutableStateOf(editingTitle) }
             Column(modifier = Modifier.padding(16.dp)) {
-
-                TextField(
+                OutlinedTextField(
                     value = title,
-                    onValueChange = {
-                        title = it
-                        viewModel.updateNoteTitle(it)
-                    },
-                    modifier = Modifier.fillMaxWidth(),
-                    maxLines = 1,
-                    placeholder = { Text("Введите заголовок") }
-                )
+                    onValueChange = { newText ->
+                        if (newText.length <= 50 && !newText.contains("\n")) {
+                            title = newText
+                            viewModel.updateNoteTitle(newText)
+                        } },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 8.dp)
+                        .border(3.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(8.dp)),
+                    singleLine = true,
+                    placeholder = {
+                        if (title.isBlank()) {
+                            Text(text = "Новая запись")
+                        } },
+                    textStyle = MaterialTheme.typography.titleMedium,
+                    colors = colors,
+                    shape = shape,)
 
                 Spacer(modifier = Modifier.height(16.dp))
 
@@ -103,17 +145,13 @@ fun EditModeScreen(viewModel: HistoryViewModel, noteId: Long) {
                     modifier = Modifier
                         .fillMaxWidth()
                         .background(MaterialTheme.colorScheme.surface)
-                        .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(8.dp))
+                        .border(3.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(8.dp))
                         .padding(16.dp),
                     contentAlignment = Alignment.Center
                 ) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         Text(
-                            text = "Воспроизведение: ${formatPlayingTimer(playbackPosition)} / ${
-                                formatPlayingTimer(
-                                    playbackDuration
-                                )
-                            }",
+                            text = "Воспроизведение: ${formatPlayingTimer(playbackPosition)} / ${formatPlayingTimer(playbackDuration)}",
                             modifier = Modifier.padding(bottom = 8.dp)
                         )
 
@@ -149,12 +187,12 @@ fun EditModeScreen(viewModel: HistoryViewModel, noteId: Long) {
                             }
 
                             IconButton(onClick = {
-                                if (isPlaying) viewModel.pausePlayback()
-                                else viewModel.playRecording(noteId)
+                                if (viewModel.isPlaying.value) viewModel.pausePlayback()
+                                else viewModel.playRecording()
                             }) {
                                 Icon(
-                                    imageVector = if (isPlaying) Icons.Default.List else Icons.Default.PlayArrow,
-                                    contentDescription = if (isPlaying) "Пауза" else "Проиграть"
+                                    imageVector = if (viewModel.isPlaying.value) Icons.Default.List else Icons.Default.PlayArrow,
+                                    contentDescription = if (viewModel.isPlaying.value) "Пауза" else "Проиграть"
                                 )
                             }
 
@@ -165,6 +203,33 @@ fun EditModeScreen(viewModel: HistoryViewModel, noteId: Long) {
                                 )
                             }
                         }
+                    }
+                }
+
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(16.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 16.dp)
+                ) {
+                    OutlinedButton(
+                        onClick = {
+                            Log.d("EditModeScreen", "Кнопка 'Вернуться' нажата")
+                            viewModel.exitEditMode()
+                        },
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Text("Вернуться")
+                    }
+
+                    Button(
+                        onClick = {
+                            Log.d("EditModeScreen", "Кнопка 'Сохранить' нажата")
+                            viewModel.saveCurrentNote()
+                        },
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Text("Сохранить")
                     }
                 }
 
@@ -244,7 +309,10 @@ private fun TranscribedTextEditor(
             Text("Распознанный текст", style = MaterialTheme.typography.titleSmall)
 
             IconButton(
-                onClick = { viewModel.updateTranscribedText(textFieldValue.text) },
+                onClick = {
+                    Log.d("TranscribedTextEditor", "Кнопка 'Сохранить'")
+                    viewModel.updateTranscribedText(textFieldValue.text)
+                          },
                 enabled = textFromViewModel != textFieldValue.text,
                 modifier = Modifier.size(60.dp)
             ) {
@@ -255,7 +323,10 @@ private fun TranscribedTextEditor(
                 )
             }
             IconButton(
-                onClick = { textFieldValue = TextFieldValue(textFromViewModel) },
+                onClick = {
+                    Log.d("TranscribedTextEditor", "Кнопка 'Сбросить'")
+                    textFieldValue = TextFieldValue(textFromViewModel)
+                          },
                 enabled = textFromViewModel != textFieldValue.text,
                 modifier = Modifier.size(60.dp)
             ) {

@@ -35,7 +35,7 @@ class HistoryViewModelFactory(
     }
 }
 
-class HistoryViewModel(application: Application) : AndroidViewModel(application) {
+class HistoryViewModel(application: Application) : BasePlaybackViewModel(application) {
 
     // Репозиторий
     private val repository: VoiceNoteRepository = VoiceNoteRepository(
@@ -57,7 +57,10 @@ class HistoryViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun exitEditMode() {
+        Log.d("HistoryViewModel", "exitEditMode()")
         _screenState.value = HistoryScreenState.Search
+        resetEditState()
+        stopPlayback()
     }
 
     // Календарь и фильтрация по дате
@@ -89,19 +92,6 @@ class HistoryViewModel(application: Application) : AndroidViewModel(application)
 
     private val _editingTranscript = MutableStateFlow("")
     val editingTranscript = _editingTranscript.asStateFlow()
-
-    // Воспроизведение аудио
-    private val _isPlaying = MutableStateFlow(false)
-    val isPlaying = _isPlaying.asStateFlow()
-
-    private val _playbackPosition = MutableStateFlow(0L)
-    val playbackPosition = _playbackPosition.asStateFlow()
-
-    private val _playbackDuration = MutableStateFlow(0L)
-    val playbackDuration = _playbackDuration.asStateFlow()
-
-    private var mediaPlayer: MediaPlayer? = null
-    private var playbackJob: Job? = null
 
     // Состояние множественного выбора
     private val _selectedNoteIds = MutableStateFlow<Set<Long>>(emptySet())
@@ -192,13 +182,14 @@ class HistoryViewModel(application: Application) : AndroidViewModel(application)
             withContext(Dispatchers.IO) {
                 repository.update(updatedNote)
             }
+            exitEditMode()
         }
     }
 
     // Загрузить запись по ID (вызывается при входе в режим редактирования)
     fun loadNoteById(noteId: Long) {
         Log.d("HistoryViewModel", "Загрузка записи с ID: $noteId")
-        viewModelScope.launch {
+        viewModelScope.launch(Dispatchers.IO) {
             repository.getNoteById(noteId)
                 .collect { note ->
                     Log.d("HistoryViewModel", "Полученная запись: $note")
@@ -206,6 +197,12 @@ class HistoryViewModel(application: Application) : AndroidViewModel(application)
                         _currentNote.emit(note)
                         _editingTitle.emit(note.title)
                         _editingTranscript.emit(note.transcript)
+
+                        val file = File(note.audioPath!!)
+                        if (file.exists()) {
+                            val duration = getAudioDurationFrom(file) // Получаем длительность до запуска
+                            _playbackDuration.emit(duration)
+                        }
                     } else {
                         Log.e("HistoryViewModel", "Запись с ID $noteId не найдена")
                     }
@@ -214,84 +211,31 @@ class HistoryViewModel(application: Application) : AndroidViewModel(application)
     }
 
     // Воспроизведение аудио
-    fun playRecording(noteId: Long) {
+    override fun playRecording() {
+        val noteId = _currentNote.value?.id ?: return
         Log.d("HistoryViewModel", "Попытка воспроизведения для ID: $noteId")
         viewModelScope.launch(Dispatchers.IO) {
-            repository.getNoteById(noteId)
-                .collect { note ->
-                    if (note != null) {
-                        val file = File(note.audioPath!!)
-                        if (file.exists()) {
-                            try {
-                                mediaPlayer?.release()
-                                mediaPlayer = MediaPlayer().apply {
-                                    setDataSource(file.absolutePath)
-                                    prepare()
-                                    start()
-                                    _playbackDuration.emit(duration.toLong())
-                                    _playbackPosition.emit(0L)
-                                    setOnCompletionListener {
-                                        _playbackPosition.value = duration.toLong()
-                                        _isPlaying.value = false
-                                    }
-                                    _isPlaying.emit(true)
-                                }
-                                startPlaybackProgressTracking()
-                            } catch (e: Exception) {
-                                e.printStackTrace()
-                                Log.e("HistoryViewModel", "Ошибка при воспроизведении: ${e.message}")
-                                _isPlaying.emit(false)
-                            }
-                        } else {
-                            Log.e("HistoryViewModel", "Файл не найден: ${note.audioPath}")
-                            _isPlaying.emit(false)
-                        }
+            repository.getNoteById(noteId).collect { note ->
+                note?.let {
+                    val file = File(it.audioPath!!)
+                    if (file.exists()) {
+                        setDataSource(file)
                     } else {
-                        Log.e("HistoryViewModel", "Запись с ID $noteId не найдена в БД")
-                        _isPlaying.emit(false)
+                        Log.e("HistoryViewModel", "Файл не найден: ${file.path}")
                     }
                 }
-        }
-    }
-
-    private fun startPlaybackProgressTracking() {
-        playbackJob = viewModelScope.launch {
-            while (mediaPlayer?.isPlaying == true) {
-                _playbackPosition.emit(mediaPlayer?.currentPosition?.toLong() ?: 0L)
-                delay(500)
             }
         }
     }
 
-    fun pausePlayback() {
-        mediaPlayer?.pause()
-        _isPlaying.value = false
-        playbackJob?.cancel()
-    }
-
-    fun fastForward() {
-        mediaPlayer?.let {
-            val newPosition = (it.currentPosition + 5000).coerceAtMost(it.duration)
-            it.seekTo(newPosition)
-            _playbackPosition.value = newPosition.toLong()
-        }
-    }
-
-    fun fastBackward() {
-        mediaPlayer?.let {
-            val newPosition = (it.currentPosition - 5000).coerceAtLeast(0)
-            it.seekTo(newPosition)
-            _playbackPosition.value = newPosition.toLong()
-        }
-    }
-
-    fun seekTo(positionMs: Long) {
-        mediaPlayer?.seekTo(positionMs.toInt())
-        _playbackPosition.value = positionMs
+    fun resetEditState() {
+        _editingTitle.value = _currentNote.value?.title ?: ""
+        _editingTranscript.value = _currentNote.value?.transcript ?: ""
     }
 
     // Удаление записи
     fun deleteNoteById(id: Long) {
+        Log.d("HistoryViewModel", "deleteNoteById($id)")
         viewModelScope.launch {
             repository.deleteNoteById(id)
         }

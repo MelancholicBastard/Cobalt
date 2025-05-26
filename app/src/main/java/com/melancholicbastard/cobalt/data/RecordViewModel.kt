@@ -42,7 +42,7 @@ class RecordViewModelFactory(
     }
 }
 
-class RecordViewModel(application: Application) : AndroidViewModel(application) {
+class RecordViewModel(application: Application) : BasePlaybackViewModel(application) {
     // Получаем контекст через application
     private val audioRecorder: AudioRecorder = AudioRecorder(application.applicationContext)
     private var audioFile: File? = null
@@ -60,15 +60,6 @@ class RecordViewModel(application: Application) : AndroidViewModel(application) 
     private var timerJob: Job? = null
     private var startTime = 0L             // Начальное время для таймера
     private var accumulatedTime: Long = 0L // Накопленное время при паузах
-
-    private var mediaPlayer: MediaPlayer? = null
-    private var playbackJob: Job? = null
-    private val _playbackPosition = MutableStateFlow(0L)
-    val playbackPosition: StateFlow<Long> = _playbackPosition
-    private val _playbackDuration = MutableStateFlow(0L)
-    val playbackDuration: StateFlow<Long> = _playbackDuration
-    private var _isPlaying = mutableStateOf(false)
-    val isPlaying: MutableState<Boolean> = _isPlaying
 
     // Репозиторий
     private val repository: VoiceNoteRepository = VoiceNoteRepository(
@@ -91,6 +82,7 @@ class RecordViewModel(application: Application) : AndroidViewModel(application) 
                 }
             } catch (e: SecurityException) {
                 permissionNeeded.value = true
+                return@launch
             }
             audioFile = audioRecorder.startRecording()
             recordingState = RecordingState.RECORDING
@@ -125,7 +117,7 @@ class RecordViewModel(application: Application) : AndroidViewModel(application) 
 
                     _textFromAudioFile.value = result.transcript
 
-                    _playbackDuration.value = getAudioDurationFrom(result.audioFile)
+                    (playbackDuration as MutableStateFlow).value = getAudioDurationFrom(result.audioFile)
 
                     recordingState = RecordingState.STOPPED
                     stopTimer()
@@ -134,17 +126,6 @@ class RecordViewModel(application: Application) : AndroidViewModel(application) 
                     stopTimer()
                 }
             }
-        }
-    }
-
-    private fun getAudioDurationFrom(file: File): Long {
-        return try {
-            val mmr = MediaMetadataRetriever()
-            mmr.setDataSource(file.absolutePath)
-            mmr.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLong() ?: 0L
-        } catch (e: Exception) {
-            Log.e("RecordViewModel", "Ошибка получения длительности: ${e.message}")
-            0L
         }
     }
 
@@ -161,94 +142,18 @@ class RecordViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun togglePlayback() {
-        if (_isPlaying.value) {
+        if (isPlaying.value) {
             pausePlayback()
         } else {
             playRecording()
         }
     }
 
-    private fun pausePlayback() {
-        mediaPlayer?.pause()
-        _isPlaying.value = false
-        playbackJob?.cancel()
-    }
 
-    private fun playRecording() {
+    override fun playRecording() {
         audioFile?.let { file ->
-            if (mediaPlayer == null) {
-                mediaPlayer = MediaPlayer().apply {
-                    try {
-                        setDataSource(file.absolutePath)
-                        prepare()
-                        start()
-
-                        val duration = mediaPlayer?.duration?.toLong() ?: 0L
-                        _playbackDuration.value = duration
-                        _playbackPosition.value = 0L
-                        setOnCompletionListener {
-                            _playbackPosition.value = duration // Переводим позицию на конец
-                            this@RecordViewModel._isPlaying.value = false
-                        }
-                    } catch (e: IOException) {
-                        Log.e("RecordViewModel", "Ошибка подготовки медиаплеера: ${e.message}")
-                        mediaPlayer?.release()
-                        mediaPlayer = null
-                    }
-                }
-            } else {
-                if (!mediaPlayer!!.isPlaying) {
-                    mediaPlayer!!.start()
-                }
-            }
-            _isPlaying.value = true
+            setDataSource(file)
         }
-        // Запускаем обновление позиции
-        startPlaybackProgressTracking()
-    }
-
-    private fun startPlaybackProgressTracking() {
-        playbackJob?.cancel()
-        playbackJob = viewModelScope.launch {
-            while (isActive && mediaPlayer?.isPlaying == true) {
-                _playbackPosition.value = mediaPlayer?.currentPosition?.toLong() ?: 0L
-                delay(500)
-            }
-            // После окончания воспроизведения:
-            _isPlaying.value = false
-        }
-    }
-
-    fun stopPlayback() {
-        mediaPlayer?.apply {
-            stop()
-            release()
-        }
-        mediaPlayer = null
-        isPlaying.value = false
-        playbackJob?.cancel()
-        _playbackPosition.value = 0L
-    }
-
-    fun fastForward() {
-        mediaPlayer?.let {
-            val newPosition = (it.currentPosition + 5000).coerceAtMost(it.duration)
-            it.seekTo(newPosition)
-            _playbackPosition.value = newPosition.toLong()
-        }
-    }
-
-    fun fastBackward() {
-        mediaPlayer?.let {
-            val newPosition = (it.currentPosition - 5000).coerceAtLeast(0)
-            it.seekTo(newPosition)
-            _playbackPosition.value = newPosition.toLong()
-        }
-    }
-
-    fun seekTo(positionMs: Long) {
-        mediaPlayer?.seekTo(positionMs.toInt())
-        _playbackPosition.value = positionMs
     }
 
     fun updateTranscribedText(newText: String) {
@@ -269,9 +174,18 @@ class RecordViewModel(application: Application) : AndroidViewModel(application) 
         viewModelScope.launch(Dispatchers.IO) {
             repository.insert(note)
             _recordSavedEvent.emit(Unit)
+            stopPlayback()
         }
-
         Log.d("RecordViewModel", "Сохраняю запись: $title, путь: ${audioFile.absolutePath}")
+    }
+
+    fun clearRecordingData() {
+        audioFile = null
+        _textFromAudioFile.value = ""
+        recordingState = RecordingState.IDLE
+        elapsedTime = 0L
+        accumulatedTime = 0L
+        mediaPlayer?.release()
     }
 
     private fun startTimer() {

@@ -2,6 +2,7 @@ package com.melancholicbastard.cobalt.ui.theme.screens
 
 import android.Manifest
 import android.app.Application
+import android.util.Log
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
@@ -38,6 +39,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
@@ -46,6 +48,7 @@ import androidx.compose.material3.TextFieldColors
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -67,6 +70,7 @@ import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.max
 import androidx.navigation.NavController
 import com.melancholicbastard.cobalt.navigation.Screen
+import kotlinx.coroutines.delay
 
 
 @Composable
@@ -92,12 +96,19 @@ import com.melancholicbastard.cobalt.navigation.Screen
             permissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
             viewModel.permissionNeeded.value = false
         }
+    }
+
+    LaunchedEffect(Unit) {
         viewModel.recordSavedEvent.collect {
-            // Переход на HistoryScreen
+            Log.d("RecordScreen", "recordSavedEvent сработал → переходим на HistoryScreen")
             navController.navigate(Screen.History.route) {
-                popUpTo(Screen.Record.route) { inclusive = true }
+                popUpTo(Screen.Record.route) {
+                    saveState = false
+                }
                 launchSingleTop = true
             }
+            delay(300)
+            viewModel.clearRecordingData()
         }
     }
 
@@ -242,6 +253,7 @@ private fun StoppedState(viewModel: RecordViewModel) {
 
     // Обновляем длительность при каждом изменении playbackDuration
     LaunchedEffect(playbackDuration) {
+        Log.d("StoppedState", "playbackDuration обновился: $playbackDuration")
         totalDuration = playbackDuration
     }
 
@@ -305,12 +317,18 @@ private fun StoppedState(viewModel: RecordViewModel) {
                 modifier = Modifier.padding(8.dp)
             ) {
                 // 1. Перемотка -5 сек
-                IconButton(onClick = { viewModel.fastBackward() }) {
+                IconButton(onClick = {
+                    Log.d("StoppedState", "Кнопка перемотки вперёд")
+                    viewModel.fastBackward()
+                }) {
                     Icon(Icons.AutoMirrored.Filled.KeyboardArrowLeft, contentDescription = "Назад")
                 }
 
                 // 2. Воспроизвести
-                IconButton(onClick = { viewModel.togglePlayback() }) {
+                IconButton(onClick = {
+                    Log.d("StoppedState", "Кнопка воспроизведения")
+                    viewModel.togglePlayback()
+                }) {
                     Icon(
                         imageVector = if (viewModel.isPlaying.value) Icons.Default.List else Icons.Default.PlayArrow,
                         contentDescription = if (viewModel.isPlaying.value) "Пауза" else "Проиграть"
@@ -318,7 +336,10 @@ private fun StoppedState(viewModel: RecordViewModel) {
                 }
 
                 // 3. Перемотка +5 сек
-                IconButton(onClick = { viewModel.fastForward() }) {
+                IconButton(onClick = {
+                    Log.d("StoppedState", "Кнопка перемотки назад")
+                    viewModel.fastForward()
+                }) {
                     Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = "Вперёд")
                 }
             }
@@ -326,7 +347,7 @@ private fun StoppedState(viewModel: RecordViewModel) {
     }
 
     Row(horizontalArrangement = Arrangement.spacedBy(16.dp), modifier = Modifier.padding(16.dp)) {
-        Button(
+        OutlinedButton(
             onClick = {
             viewModel.stopPlayback()
             viewModel.cancelRecording() }
@@ -343,8 +364,91 @@ private fun StoppedState(viewModel: RecordViewModel) {
             Text("Сохранить запись")
         }
     }
-        // Редактор транскрипции
-        TranscribedTextEditor(viewModel = viewModel, colors, shape)
+    // Редактор транскрипции
+    TranscribedTextEditor(viewModel = viewModel, colors, shape)
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun TranscribedTextEditor(
+    textState: MutableState<String>,
+    onTextChanged: (String) -> Unit,
+    onSave: () -> Unit,
+    onReset: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val textFieldValue = remember(textState.value) {
+        mutableStateOf(TextFieldValue(textState.value))
+    }
+    val scrollState = rememberScrollState()
+    val keyboardController = LocalSoftwareKeyboardController.current
+    val imeInsets = WindowInsets.ime.asPaddingValues()
+
+    val colors = TextFieldDefaults.textFieldColors(
+        focusedIndicatorColor = Color.Transparent,
+        unfocusedIndicatorColor = Color.Transparent,
+        disabledIndicatorColor = Color.Transparent,
+        containerColor = MaterialTheme.colorScheme.surfaceBright
+    )
+
+    val shape = RoundedCornerShape(
+        topStart = 8.dp,
+        topEnd = 8.dp,
+        bottomStart = 8.dp,
+        bottomEnd = 8.dp
+    )
+
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(bottom = max(imeInsets.calculateBottomPadding() - 75.dp, 0.dp)),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.padding(bottom = 16.dp)
+        ) {
+            Text("Распознанный текст", style = MaterialTheme.typography.titleSmall)
+
+            IconButton(onClick = onSave, enabled = textFieldValue.value.text != textState.value) {
+                Icon(Icons.Default.Done, contentDescription = "Сохранить")
+            }
+
+            IconButton(onClick = onReset) {
+                Icon(Icons.Default.Refresh, contentDescription = "Сбросить")
+            }
+        }
+
+        Box(
+            modifier = Modifier
+                .weight(1f)
+                .background(MaterialTheme.colorScheme.surfaceBright)
+                .border(3.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(8.dp))
+                .verticalScroll(scrollState)
+        ) {
+            OutlinedTextField(
+                value = textFieldValue.value,
+                onValueChange = { newText ->
+                    textFieldValue.value = newText
+                    onTextChanged(newText.text)
+                },
+                modifier = Modifier
+                    .fillMaxSize()
+                    .onFocusChanged { focusState ->
+                        if (focusState.isFocused) {
+                            keyboardController?.show()
+                        }
+                    }
+                    .background(MaterialTheme.colorScheme.surfaceBright),
+                maxLines = Int.MAX_VALUE,
+                textStyle = MaterialTheme.typography.bodyLarge,
+                colors = colors,
+                shape = shape,
+                singleLine = false
+            )
+        }
+    }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -384,7 +488,10 @@ private fun TranscribedTextEditor(
             Text("Распознанный текст", style = MaterialTheme.typography.titleSmall)
 
             IconButton(
-                onClick = { viewModel.updateTranscribedText(textFieldValue.text) },
+                onClick = {
+                    Log.d("TranscribedTextEditor", "Кнопка 'Сохранить'")
+                    viewModel.updateTranscribedText(textFieldValue.text)
+                          },
                 enabled = textFromViewModel != textFieldValue.text,
                 modifier = Modifier.size(60.dp)
             ) {
@@ -395,7 +502,10 @@ private fun TranscribedTextEditor(
                 )
             }
             IconButton(
-                onClick = { textFieldValue = TextFieldValue(textFromViewModel) },
+                onClick = {
+                    Log.d("TranscribedTextEditor", "Кнопка 'Сбросить'")
+                    textFieldValue = TextFieldValue(textFromViewModel)
+                          },
                 enabled = textFromViewModel != textFieldValue.text,
                 modifier = Modifier.size(60.dp)
             ) {
