@@ -3,6 +3,7 @@ package com.melancholicbastard.cobalt.ui.theme.screens
 import android.util.Log
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.compose.LocalOnBackPressedDispatcherOwner
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
@@ -28,8 +29,10 @@ import androidx.compose.material.icons.filled.Done
 import androidx.compose.material.icons.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.List
+import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.outlined.PlayArrow
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -39,6 +42,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Slider
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldColors
@@ -71,7 +75,6 @@ import com.melancholicbastard.cobalt.data.RecordViewModel
     // Состояния из ViewModel через StateFlow
     val currentNote by viewModel.currentNote.collectAsState()
     val editingTitle by viewModel.editingTitle.collectAsState()
-//    val editingTranscript by viewModel.editingTranscript.collectAsState()
     val playbackPosition by viewModel.playbackPosition.collectAsState()
     val playbackDuration by viewModel.playbackDuration.collectAsState()
     val screenState by viewModel.screenState.collectAsState()
@@ -116,7 +119,13 @@ import com.melancholicbastard.cobalt.data.RecordViewModel
             Log.d("EditModeScreen", "Запись найдена: ${note.title}")
             // Редактирование заголовка
             var title by remember { mutableStateOf(editingTitle) }
-            Column(modifier = Modifier.padding(16.dp)) {
+            Column(
+                modifier = Modifier
+                        .fillMaxSize()
+                        .padding(16.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center
+            ) {
                 OutlinedTextField(
                     value = title,
                     onValueChange = { newText ->
@@ -134,23 +143,30 @@ import com.melancholicbastard.cobalt.data.RecordViewModel
                             Text(text = "Новая запись")
                         } },
                     textStyle = MaterialTheme.typography.titleMedium,
-                    colors = colors,
-                    shape = shape,)
-
-                Spacer(modifier = Modifier.height(16.dp))
+                    colors = TextFieldDefaults.textFieldColors(
+                        focusedIndicatorColor = Color.Transparent,
+                        unfocusedIndicatorColor = Color.Transparent,
+                        disabledIndicatorColor = Color.Transparent,
+                        containerColor = MaterialTheme.colorScheme.surfaceBright
+                    ),
+                    shape = RoundedCornerShape(8.dp),)
 
                 // Плеер
-                Box(
+                Surface(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .background(MaterialTheme.colorScheme.surface)
-                        .border(3.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(8.dp))
-                        .padding(16.dp),
-                    contentAlignment = Alignment.Center
+                        .padding(vertical = 16.dp),
+                    shape = RoundedCornerShape(8.dp),
+                    color = MaterialTheme.colorScheme.surface,
+                    border = BorderStroke(3.dp, MaterialTheme.colorScheme.outline)
                 ) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Column(
+                        modifier = Modifier.padding(top = 16.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.Center
+                    ) {
                         Text(
-                            text = "Воспроизведение: ${formatPlayingTimer(playbackPosition)} / ${formatPlayingTimer(playbackDuration)}",
+                            text = "Время: ${formatPlayingTimer(playbackPosition)} / ${formatPlayingTimer(playbackDuration)}",
                             modifier = Modifier.padding(bottom = 8.dp)
                         )
 
@@ -190,7 +206,7 @@ import com.melancholicbastard.cobalt.data.RecordViewModel
                                 else viewModel.playRecording()
                             }) {
                                 Icon(
-                                    imageVector = if (viewModel.isPlaying.value) Icons.Default.List else Icons.Default.PlayArrow,
+                                    imageVector = if (viewModel.isPlaying.value) Icons.Default.Pause else Icons.Outlined.PlayArrow,
                                     contentDescription = if (viewModel.isPlaying.value) "Пауза" else "Проиграть"
                                 )
                             }
@@ -207,16 +223,13 @@ import com.melancholicbastard.cobalt.data.RecordViewModel
 
                 Row(
                     horizontalArrangement = Arrangement.spacedBy(16.dp),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(top = 16.dp)
+                    modifier = Modifier.padding(8.dp)
                 ) {
                     OutlinedButton(
                         onClick = {
                             Log.d("EditModeScreen", "Кнопка 'Вернуться' нажата")
                             viewModel.exitEditMode()
-                        },
-                        modifier = Modifier.weight(1f)
+                        }
                     ) {
                         Text("Вернуться")
                     }
@@ -225,15 +238,11 @@ import com.melancholicbastard.cobalt.data.RecordViewModel
                         onClick = {
                             Log.d("EditModeScreen", "Кнопка 'Сохранить' нажата")
                             viewModel.saveCurrentNote()
-                        },
-                        modifier = Modifier.weight(1f)
+                        }
                     ) {
                         Text("Сохранить")
                     }
                 }
-
-                Spacer(modifier = Modifier.height(16.dp))
-
                 // Редактор транскрипции
                 TranscribedTextEditor(viewModel = viewModel)
             }
@@ -249,21 +258,7 @@ import com.melancholicbastard.cobalt.data.RecordViewModel
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun TranscribedTextEditor(
-    viewModel: HistoryViewModel,
-    colors: TextFieldColors = TextFieldDefaults.textFieldColors(
-        focusedIndicatorColor = Color.Transparent,
-        unfocusedIndicatorColor = Color.Transparent,
-        disabledIndicatorColor = Color.Transparent,
-        containerColor = MaterialTheme.colorScheme.surfaceBright
-    ),
-    shape: RoundedCornerShape = RoundedCornerShape(
-        topStart = 8.dp,
-        topEnd = 8.dp,
-        bottomStart = 8.dp,
-        bottomEnd = 8.dp
-    )
-) {
+private fun TranscribedTextEditor(viewModel: HistoryViewModel) {
     val textFromViewModel by viewModel.editingTranscript.collectAsState()
     var textFieldValue by remember { mutableStateOf(TextFieldValue(textFromViewModel)) }
     val scrollState = rememberScrollState()
@@ -313,12 +308,13 @@ private fun TranscribedTextEditor(
             }
         }
 
-        Box(
+        Surface(
             modifier = Modifier
                 .weight(1f)
-                .background(MaterialTheme.colorScheme.surfaceBright)
-                .border(3.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(8.dp))
-                .verticalScroll(scrollState)
+                .verticalScroll(scrollState),
+            shape = RoundedCornerShape(8.dp),
+            color = MaterialTheme.colorScheme.surfaceBright,
+            border = BorderStroke(3.dp, MaterialTheme.colorScheme.outline)
         ) {
             OutlinedTextField(
                 value = textFieldValue,
@@ -333,8 +329,12 @@ private fun TranscribedTextEditor(
                     .background(MaterialTheme.colorScheme.surfaceBright),
                 maxLines = Int.MAX_VALUE,
                 textStyle = MaterialTheme.typography.bodyLarge,
-                colors = colors,
-                shape = shape,
+                colors = TextFieldDefaults.textFieldColors(
+                    focusedIndicatorColor = Color.Transparent,
+                    unfocusedIndicatorColor = Color.Transparent,
+                    disabledIndicatorColor = Color.Transparent,
+                    containerColor = MaterialTheme.colorScheme.surfaceBright
+                ),
                 singleLine = false
             )
         }

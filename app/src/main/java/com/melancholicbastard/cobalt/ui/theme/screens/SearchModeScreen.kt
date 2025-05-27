@@ -6,6 +6,7 @@ import android.util.Log
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -27,6 +28,7 @@ import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.*
 import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
@@ -61,9 +63,12 @@ import com.melancholicbastard.cobalt.db.VoiceNote
 import java.util.Calendar
 import java.util.Date
 import androidx.compose.material3.DatePicker
+import androidx.compose.material3.Surface
+import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.style.TextOverflow
 import java.util.Locale
@@ -82,6 +87,10 @@ fun SearchModeScreen(viewModel: HistoryViewModel) {
         }
     }
 
+    LaunchedEffect(Unit) {
+        viewModel.loadNotesForDate(viewModel.selectedDate.value)
+    }
+
     Column(modifier = Modifier.fillMaxSize()) {
         // Шапка с кнопками
         when (mode) {
@@ -89,33 +98,43 @@ fun SearchModeScreen(viewModel: HistoryViewModel) {
                 // Стандартный интерфейс поиска и даты
                 val selectedDate by viewModel.selectedDate.collectAsState()
                 val searchQuery by viewModel.searchQuery.collectAsState()
+                Surface(
+                    modifier = Modifier.padding(16.dp),
+                    shape = RoundedCornerShape(8.dp),
+                    color = MaterialTheme.colorScheme.surface,
+                    border = BorderStroke(3.dp, MaterialTheme.colorScheme.outline)
+                ) {
+                    Column {
+                        // Поисковое поле
+                        TextField(
+                            value = searchQuery,
+                            onValueChange = { query ->
+                                viewModel.updateSearchQuery(query)
+                                if (query.isNotBlank()) {
+                                    viewModel.searchNotes(query)
+                                } else {
+                                    viewModel.loadNotesForDate(selectedDate)
+                                }
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                            label = { Text("Поиск") },
+                            colors = TextFieldDefaults.colors( // Важно: кастомизация цветов TextField
+                                focusedContainerColor = MaterialTheme.colorScheme.surface,
+                                unfocusedContainerColor = MaterialTheme.colorScheme.surface,
+                                focusedLabelColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                                unfocusedLabelColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+                            )
+                        )
 
-                Column(modifier = Modifier.padding(16.dp)) {
-                    // Поисковое поле
-                    TextField(
-                        value = searchQuery,
-                        onValueChange = { query ->
-                            viewModel.updateSearchQuery(query)
-                            if (query.isNotBlank()) {
-                                viewModel.searchNotes(query)
-                            } else {
-                                viewModel.loadNotesForDate(selectedDate)
+                        // Строка выбора даты
+                        DateSelectionRow(
+                            selectedDate = selectedDate,
+                            onDateSelected = { date ->
+                                viewModel.updateSelectedDate(date)
+                                viewModel.loadNotesForDate(date)
                             }
-                        },
-                        modifier = Modifier.fillMaxWidth(),
-                        label = { Text("Поиск") }
-                    )
-
-                    Spacer(modifier = Modifier.height(8.dp))
-
-                    // Строка выбора даты
-                    DateSelectionRow(
-                        selectedDate = selectedDate,
-                        onDateSelected = { date ->
-                            viewModel.updateSelectedDate(date)
-                            viewModel.loadNotesForDate(date)
-                        }
-                    )
+                        )
+                    }
                 }
             }
 
@@ -144,7 +163,7 @@ fun SearchModeScreen(viewModel: HistoryViewModel) {
             modifier = Modifier
                 .fillMaxHeight()
                 .weight(1f)
-                .background(MaterialTheme.colorScheme.surface)
+                .background(MaterialTheme.colorScheme.background)
                 .padding(horizontal = 8.dp),
             contentPadding = PaddingValues(horizontal = 8.dp)
         ) {
@@ -215,7 +234,7 @@ fun DateSelectionRow(
             modifier = Modifier.padding(end = 16.dp)
         ) {
             Icon(
-                imageVector = Icons.Filled.Star,
+                imageVector = Icons.Filled.DateRange,
                 contentDescription = "Выбрать дату"
             )
         }

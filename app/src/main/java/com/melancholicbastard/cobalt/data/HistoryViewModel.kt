@@ -139,6 +139,7 @@ class HistoryViewModel(application: Application) : BasePlaybackViewModel(applica
             }
         }
     }
+
     // Поиск записей по подстроке
     fun searchNotes(query: String) {
         viewModelScope.launch {

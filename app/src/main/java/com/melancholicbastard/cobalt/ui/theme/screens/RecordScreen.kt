@@ -5,16 +5,19 @@ import android.app.Application
 import android.util.Log
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -31,9 +34,13 @@ import androidx.compose.material.icons.filled.Done
 import androidx.compose.material.icons.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.List
+import androidx.compose.material.icons.filled.Mic
+import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -42,6 +49,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Slider
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldColors
@@ -67,6 +75,7 @@ import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.input.TextFieldValue
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.max
 import androidx.navigation.NavController
 import com.melancholicbastard.cobalt.navigation.Screen
@@ -149,48 +158,64 @@ private fun IdleState(viewModel: RecordViewModel) {
     Button(
         onClick = { viewModel.startRecording() },
         modifier = Modifier.size(100.dp),
-        shape = CircleShape
+        shape = CircleShape,
+        colors = ButtonDefaults.buttonColors(
+            containerColor = MaterialTheme.colorScheme.primary,
+            contentColor = MaterialTheme.colorScheme.onPrimary
+    ),
     ) {
         Icon(
-            imageVector = Icons.Default.Call,
+            imageVector = Icons.Outlined.Mic,
             contentDescription = "Record",
             modifier = Modifier.size(48.dp)
         )
     }
+
+    Spacer(modifier = Modifier.height(16.dp))
+
     Text("Нажмите для начала записи")
 }
 
 @Composable
 private fun RecordingState(viewModel: RecordViewModel) {
-    // Состояние записи - таймер и кнопки управления
-    RecordingTimer(viewModel.elapsedTime)
-
-    Row(
-        horizontalArrangement = Arrangement.spacedBy(16.dp),
-        verticalAlignment = Alignment.CenterVertically
+    Column(
+        modifier = Modifier
+            .fillMaxSize(),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
     ) {
-        // Кнопка паузы
-        IconButton(
-            onClick = { viewModel.pauseRecording() },
-            modifier = Modifier.size(60.dp)
-        ) {
-            Icon(
-                imageVector = Icons.Default.List,
-                contentDescription = "Pause",
-                modifier = Modifier.size(36.dp)
-            )
-        }
+        // Состояние записи - таймер и кнопки управления
+        RecordingTimer(viewModel.elapsedTime)
 
-        // Кнопка отмены
-        IconButton(
-            onClick = { viewModel.cancelRecording() },
-            modifier = Modifier.size(60.dp)
+        Spacer(modifier = Modifier.height(16.dp))
+
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(16.dp),
+            verticalAlignment = Alignment.CenterVertically
         ) {
-            Icon(
-                imageVector = Icons.Default.Close,
-                contentDescription = "Cancel",
-                modifier = Modifier.size(36.dp)
-            )
+            // Кнопка паузы
+            IconButton(
+                onClick = { viewModel.pauseRecording() },
+                modifier = Modifier.size(60.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Outlined.Pause,
+                    contentDescription = "Pause",
+                    modifier = Modifier.size(36.dp)
+                )
+            }
+
+            // Кнопка отмены
+            IconButton(
+                onClick = { viewModel.cancelRecording() },
+                modifier = Modifier.size(60.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Outlined.Close,
+                    contentDescription = "Cancel",
+                    modifier = Modifier.size(36.dp)
+                )
+            }
         }
     }
 }
@@ -199,6 +224,8 @@ private fun RecordingState(viewModel: RecordViewModel) {
 private fun PausedState(viewModel: RecordViewModel) {
     // Состояние паузы - кнопки возобновления/отмены
     RecordingTimer(viewModel.elapsedTime)
+
+    Spacer(modifier = Modifier.height(16.dp))
 
     Row(
         horizontalArrangement = Arrangement.spacedBy(16.dp),
@@ -210,7 +237,7 @@ private fun PausedState(viewModel: RecordViewModel) {
             modifier = Modifier.size(60.dp)
         ) {
             Icon(
-                imageVector = Icons.Default.PlayArrow,
+                imageVector = Icons.Outlined.PlayArrow,
                 contentDescription = "Resume",
                 modifier = Modifier.size(36.dp)
             )
@@ -222,7 +249,7 @@ private fun PausedState(viewModel: RecordViewModel) {
             modifier = Modifier.size(60.dp)
         ) {
             Icon(
-                imageVector = Icons.Default.Done,
+                imageVector = Icons.Outlined.Done,
                 contentDescription = "Stop",
                 modifier = Modifier.size(36.dp)
             )
@@ -237,19 +264,6 @@ private fun StoppedState(viewModel: RecordViewModel) {
     val playbackDuration by remember { derivedStateOf { viewModel.playbackDuration.value } }
     var totalDuration by remember { mutableLongStateOf(0L) }
     var recordingTitle by remember { mutableStateOf(TextFieldValue("")) }
-
-    val colors = TextFieldDefaults.textFieldColors(
-        focusedIndicatorColor = Color.Transparent,
-        unfocusedIndicatorColor = Color.Transparent,
-        disabledIndicatorColor = Color.Transparent,
-        containerColor = MaterialTheme.colorScheme.surfaceBright
-    )
-    val shape = RoundedCornerShape(
-        topStart = 8.dp,
-        topEnd = 8.dp,
-        bottomStart = 8.dp,
-        bottomEnd = 8.dp
-    )
 
     // Обновляем длительность при каждом изменении playbackDuration
     LaunchedEffect(playbackDuration) {
@@ -273,17 +287,24 @@ private fun StoppedState(viewModel: RecordViewModel) {
                 Text(text = "Новая запись")
             } },
         textStyle = MaterialTheme.typography.titleMedium,
-        colors = colors,
-        shape = shape,)
+        colors = TextFieldDefaults.textFieldColors(
+            focusedIndicatorColor = Color.Transparent,
+            unfocusedIndicatorColor = Color.Transparent,
+            disabledIndicatorColor = Color.Transparent,
+            containerColor = MaterialTheme.colorScheme.surfaceBright
+        ),
+        shape = RoundedCornerShape(8.dp),)
 
-    Box(
+    Surface(
         modifier = Modifier
             .fillMaxWidth()
-            .background(MaterialTheme.colorScheme.surface)
-            .border(3.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(8.dp))
-            .padding(16.dp)
+            .padding(vertical = 16.dp),
+        shape = RoundedCornerShape(8.dp),
+        color = MaterialTheme.colorScheme.surface,
+        border = BorderStroke(3.dp, MaterialTheme.colorScheme.outline)
     ) {
         Column(
+            modifier = Modifier.padding(top = 16.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center
         ) {
@@ -298,6 +319,7 @@ private fun StoppedState(viewModel: RecordViewModel) {
                         playbackPosition / totalDuration.toFloat()
                     }
                 }
+
                 Slider(
                     value = progress,
                     onValueChange = { newProgress ->
@@ -330,7 +352,7 @@ private fun StoppedState(viewModel: RecordViewModel) {
                     viewModel.togglePlayback()
                 }) {
                     Icon(
-                        imageVector = if (viewModel.isPlaying.value) Icons.Default.List else Icons.Default.PlayArrow,
+                        imageVector = if (viewModel.isPlaying.value) Icons.Outlined.Pause else Icons.Outlined.PlayArrow,
                         contentDescription = if (viewModel.isPlaying.value) "Пауза" else "Проиграть"
                     )
                 }
@@ -346,128 +368,35 @@ private fun StoppedState(viewModel: RecordViewModel) {
         }
     }
 
-    Row(horizontalArrangement = Arrangement.spacedBy(16.dp), modifier = Modifier.padding(16.dp)) {
+    Row(
+        horizontalArrangement = Arrangement.spacedBy(16.dp),
+        modifier = Modifier.padding(8.dp)
+    ) {
         OutlinedButton(
             onClick = {
             viewModel.stopPlayback()
-            viewModel.cancelRecording() }
+            viewModel.cancelRecording()
+            }
         ) {
             Text("Новая запись")
         }
 
         Button(
             onClick = {
-            val title = if (recordingTitle.text.isBlank()) "Новая запись" else recordingTitle.text
-            viewModel.saveToDatabase( title ) },
+                val title = if (recordingTitle.text.isBlank()) "Новая запись" else recordingTitle.text
+                viewModel.saveToDatabase( title )
+            },
             enabled = !viewModel.isPlaying.value
         ) {
             Text("Сохранить запись")
         }
     }
     // Редактор транскрипции
-    TranscribedTextEditor(viewModel = viewModel, colors, shape)
+    TranscribedTextEditor(viewModel = viewModel)
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun TranscribedTextEditor(
-    textState: MutableState<String>,
-    onTextChanged: (String) -> Unit,
-    onSave: () -> Unit,
-    onReset: () -> Unit,
-    modifier: Modifier = Modifier
-) {
-    val textFieldValue = remember(textState.value) {
-        mutableStateOf(TextFieldValue(textState.value))
-    }
-    val scrollState = rememberScrollState()
-    val keyboardController = LocalSoftwareKeyboardController.current
-    val imeInsets = WindowInsets.ime.asPaddingValues()
-
-    val colors = TextFieldDefaults.textFieldColors(
-        focusedIndicatorColor = Color.Transparent,
-        unfocusedIndicatorColor = Color.Transparent,
-        disabledIndicatorColor = Color.Transparent,
-        containerColor = MaterialTheme.colorScheme.surfaceBright
-    )
-
-    val shape = RoundedCornerShape(
-        topStart = 8.dp,
-        topEnd = 8.dp,
-        bottomStart = 8.dp,
-        bottomEnd = 8.dp
-    )
-
-    Column(
-        modifier = modifier
-            .fillMaxWidth()
-            .padding(bottom = max(imeInsets.calculateBottomPadding() - 75.dp, 0.dp)),
-        horizontalAlignment = Alignment.CenterHorizontally
-    ) {
-        Row(
-            horizontalArrangement = Arrangement.spacedBy(16.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier.padding(bottom = 16.dp)
-        ) {
-            Text("Распознанный текст", style = MaterialTheme.typography.titleSmall)
-
-            IconButton(onClick = onSave, enabled = textFieldValue.value.text != textState.value) {
-                Icon(Icons.Default.Done, contentDescription = "Сохранить")
-            }
-
-            IconButton(onClick = onReset) {
-                Icon(Icons.Default.Refresh, contentDescription = "Сбросить")
-            }
-        }
-
-        Box(
-            modifier = Modifier
-                .weight(1f)
-                .background(MaterialTheme.colorScheme.surfaceBright)
-                .border(3.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(8.dp))
-                .verticalScroll(scrollState)
-        ) {
-            OutlinedTextField(
-                value = textFieldValue.value,
-                onValueChange = { newText ->
-                    textFieldValue.value = newText
-                    onTextChanged(newText.text)
-                },
-                modifier = Modifier
-                    .fillMaxSize()
-                    .onFocusChanged { focusState ->
-                        if (focusState.isFocused) {
-                            keyboardController?.show()
-                        }
-                    }
-                    .background(MaterialTheme.colorScheme.surfaceBright),
-                maxLines = Int.MAX_VALUE,
-                textStyle = MaterialTheme.typography.bodyLarge,
-                colors = colors,
-                shape = shape,
-                singleLine = false
-            )
-        }
-    }
-}
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun TranscribedTextEditor(
-    viewModel: RecordViewModel,
-    colors: TextFieldColors = TextFieldDefaults.textFieldColors(
-        focusedIndicatorColor = Color.Transparent,
-        unfocusedIndicatorColor = Color.Transparent,
-        disabledIndicatorColor = Color.Transparent,
-        containerColor = MaterialTheme.colorScheme.surfaceBright
-    ),
-    shape: RoundedCornerShape = RoundedCornerShape(
-        topStart = 8.dp,
-        topEnd = 8.dp,
-        bottomStart = 8.dp,
-        bottomEnd = 8.dp
-    )
-) {
+private fun TranscribedTextEditor(viewModel: RecordViewModel) {
     val textFromViewModel by viewModel.textFromAudioFile.collectAsState()
     var textFieldValue by remember { mutableStateOf(TextFieldValue(textFromViewModel)) }
     val scrollState = rememberScrollState()
@@ -496,7 +425,7 @@ private fun TranscribedTextEditor(
                 modifier = Modifier.size(60.dp)
             ) {
                 Icon(
-                    imageVector = Icons.Default.Done,
+                    imageVector = Icons.Outlined.Done,
                     contentDescription = "Save",
                     modifier = Modifier.size(36.dp)
                 )
@@ -510,19 +439,20 @@ private fun TranscribedTextEditor(
                 modifier = Modifier.size(60.dp)
             ) {
                 Icon(
-                    imageVector = Icons.Default.Refresh,
+                    imageVector = Icons.Outlined.Refresh,
                     contentDescription = "ReturnBack",
                     modifier = Modifier.size(36.dp)
                 )
             }
         }
 
-        Box(
+        Surface(
             modifier = Modifier
                 .weight(1f)
-                .background(MaterialTheme.colorScheme.surfaceBright)
-                .border(3.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(8.dp))
-                .verticalScroll(scrollState)
+                .verticalScroll(scrollState),
+            shape = RoundedCornerShape(8.dp),
+            color = MaterialTheme.colorScheme.surfaceBright,
+            border = BorderStroke(3.dp, MaterialTheme.colorScheme.outline)
         ) {
             OutlinedTextField(
                 value = textFieldValue,
@@ -531,14 +461,18 @@ private fun TranscribedTextEditor(
                     .fillMaxSize()
                     .onFocusChanged { focusState ->
                         if (focusState.isFocused) {
-                            keyboardController?.show() // Показываем клавиатуру
+                            keyboardController?.show()
                         }
-                    }
-                    .background(MaterialTheme.colorScheme.surfaceBright),
+                    },
                 maxLines = Int.MAX_VALUE,
                 textStyle = MaterialTheme.typography.bodyLarge,
-                colors = colors,
-                shape = shape,
+                colors = TextFieldDefaults.colors(
+                    focusedContainerColor = Color.Transparent,
+                    unfocusedContainerColor = Color.Transparent,
+                    disabledContainerColor = Color.Transparent,
+                    focusedIndicatorColor = Color.Transparent,
+                    unfocusedIndicatorColor = Color.Transparent
+                ),
                 singleLine = false
             )
         }
@@ -559,12 +493,27 @@ private fun RecordingTimer(milliseconds: Long) {
             String.format("%02d:%02d:%02d", minutes, seconds, millis)
         }
     }
-
-    Text(
-        text = formattedTime,
-        style = MaterialTheme.typography.displayMedium,
-        modifier = Modifier.padding(vertical = 24.dp)
-    )
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 64.dp),
+        shape = RoundedCornerShape(8.dp),
+        color = MaterialTheme.colorScheme.surface,
+        border = BorderStroke(3.dp, MaterialTheme.colorScheme.outline)
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(32.dp),
+            contentAlignment = Alignment.Center // Ключевая строка
+        ) {
+            Text(
+                text = formattedTime,
+                style = MaterialTheme.typography.displayMedium,
+                textAlign = TextAlign.Center // Для многострочного текста
+            )
+        }
+    }
 }
 
 fun formatPlayingTimer(millis: Long): String {
