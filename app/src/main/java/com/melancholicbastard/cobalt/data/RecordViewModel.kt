@@ -1,22 +1,22 @@
 package com.melancholicbastard.cobalt.data
 
 import android.app.Application
-import android.media.MediaMetadataRetriever
-import android.media.MediaPlayer
 import android.os.SystemClock
 import android.util.Log
-import androidx.compose.runtime.MutableState
+import android.widget.Toast
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
-import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
+import androidx.lifecycle.application
 import androidx.lifecycle.viewModelScope
+import com.google.android.material.snackbar.Snackbar
 import com.melancholicbastard.cobalt.db.VoiceNote
 import com.melancholicbastard.cobalt.db.VoiceNoteDB
 import com.melancholicbastard.cobalt.db.VoiceNoteRepository
+import com.melancholicbastard.cobalt.network.WebSocketManager
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -24,10 +24,10 @@ import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
-import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import java.io.File
 import java.io.IOException
 
@@ -68,6 +68,9 @@ class RecordViewModel(application: Application) : BasePlaybackViewModel(applicat
     private val _recordSavedEvent = MutableSharedFlow<Unit>()
     val recordSavedEvent = _recordSavedEvent.asSharedFlow()
 
+    val sharedPreferences = SharedPreferencesHelper(application)
+    val networkChecker = NetworkChecker(application)
+
     init {
         VoskModelManager.initialize(application)
     }
@@ -105,25 +108,69 @@ class RecordViewModel(application: Application) : BasePlaybackViewModel(applicat
     fun stopRecording() {
         recordingState = RecordingState.LOADING
         viewModelScope.launch(Dispatchers.IO) {
-            val result = try {
+            val wavFile = try {
                 audioRecorder.stopRecording()
             } catch (e: IOException) {
+                Log.e("AudioRecorder", "Ошибка при обработке файла", e)
                 null
+            } ?: run {
+                withContext(Dispatchers.Main) {
+                    recordingState = RecordingState.IDLE
+                    stopTimer()
+                }
+                return@launch
             }
 
-            withContext(Dispatchers.Main) {
-                if (result != null) {
-                    audioFile = result.audioFile
+            try {
+                val useServer = sharedPreferences.useServerModel
+                val hasInternet = networkChecker.isInternetAvailable()
 
-                    _textFromAudioFile.value = result.transcript
+                // 1. Распознавание текста
+                val text = withTimeoutOrNull(90_000) {
+                    try {
+                        when {
+                            useServer && hasInternet -> {
+                                // Отправка на сервер
+                                WebSocketManager.sendAudio(wavFile)
+                            }
+                            else -> {
+                                // Локальное распознавание
+                                VoskModelManager.recognizeAudio(wavFile)
+                            }
+                        }
+                    } catch (e: Exception) {
+                        Log.e("RecordViewModel", "Ошибка распознавания", e)
+                        null
+                    }
+                }?: "Превышено время ожидания"
 
-                    (playbackDuration as MutableStateFlow).value = getAudioDurationFrom(result.audioFile)
+                // 2. Конвертация в AAC/MP4
+                val mp4File = audioRecorder.convertToAac(wavFile)
+
+                withContext(Dispatchers.Main) {
+                    Log.d("Text", "$text")
+                    _textFromAudioFile.value = text ?: "Ошибка распознавания"
+
+                    audioFile = mp4File
+
+                    (playbackDuration as MutableStateFlow).value = getAudioDurationFrom(audioFile!!)
 
                     recordingState = RecordingState.STOPPED
                     stopTimer()
-                } else {
-                    recordingState = RecordingState.IDLE
+                }
+            } catch (e: Exception) {
+                Log.e("RecordViewModel", "Ошибка обработки", e)
+                withContext(Dispatchers.Main) {
+                    _textFromAudioFile.value = "Ошибка: ${e.localizedMessage}"
+                    recordingState = RecordingState.STOPPED
                     stopTimer()
+                }
+            } finally {
+                try {
+                    WebSocketManager.close()
+                    wavFile.delete()
+                } catch (e: Exception) {
+                    Log.e("RecordViewModel", "Ошибка при очистке", e)
                 }
             }
         }
@@ -197,6 +244,10 @@ class RecordViewModel(application: Application) : BasePlaybackViewModel(applicat
         elapsedTime = 0L
         accumulatedTime = 0L
         mediaPlayer?.release()
+    }
+
+    fun snackbar() {
+        Toast.makeText(application, "Используются локальные мощности", Toast.LENGTH_SHORT).show()
     }
 
     private fun startTimer() {

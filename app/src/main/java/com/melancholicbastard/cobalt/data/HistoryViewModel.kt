@@ -2,12 +2,7 @@ package com.melancholicbastard.cobalt.data
 
 import android.annotation.SuppressLint
 import android.app.Application
-import android.icu.util.Calendar
-import android.media.MediaPlayer
 import android.util.Log
-import androidx.lifecycle.AndroidViewModel
-import androidx.lifecycle.LiveData
-import androidx.lifecycle.MutableLiveData
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.asFlow
@@ -16,14 +11,11 @@ import com.melancholicbastard.cobalt.db.VoiceNote
 import com.melancholicbastard.cobalt.db.VoiceNoteDB
 import com.melancholicbastard.cobalt.db.VoiceNoteRepository
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.cancelChildren
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 import java.io.File
 
 class HistoryViewModelFactory(

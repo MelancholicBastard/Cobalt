@@ -6,7 +6,6 @@ import android.util.Log
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -28,17 +27,12 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
-import androidx.compose.material.icons.filled.Call
-import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.Done
-import androidx.compose.material.icons.filled.KeyboardArrowLeft
-import androidx.compose.material.icons.filled.KeyboardArrowRight
-import androidx.compose.material.icons.filled.List
-import androidx.compose.material.icons.filled.Mic
-import androidx.compose.material.icons.filled.Pause
-import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material.icons.outlined.*
+import androidx.compose.material.icons.outlined.Close
+import androidx.compose.material.icons.outlined.Done
+import androidx.compose.material.icons.outlined.Mic
+import androidx.compose.material.icons.outlined.Pause
+import androidx.compose.material.icons.outlined.PlayArrow
+import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -51,33 +45,30 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextField
-import androidx.compose.material3.TextFieldColors
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.MutableState
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.unit.dp
-import androidx.lifecycle.viewmodel.compose.viewModel
-import com.melancholicbastard.cobalt.data.RecordViewModel
-import com.melancholicbastard.cobalt.data.RecordViewModelFactory
-import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.max
+import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavController
+import com.melancholicbastard.cobalt.data.RecordViewModel
+import com.melancholicbastard.cobalt.data.RecordViewModelFactory
 import com.melancholicbastard.cobalt.navigation.Screen
 import kotlinx.coroutines.delay
 
@@ -133,13 +124,16 @@ import kotlinx.coroutines.delay
             RecordViewModel.RecordingState.RECORDING -> RecordingState(viewModel)
             RecordViewModel.RecordingState.PAUSED -> PausedState(viewModel)
             RecordViewModel.RecordingState.STOPPED -> StoppedState(viewModel)
-            RecordViewModel.RecordingState.LOADING -> LoadingState()
+            RecordViewModel.RecordingState.LOADING -> LoadingState(viewModel)
         }
     }
 }
 
 @Composable
-fun LoadingState() {
+fun LoadingState(viewModel: RecordViewModel) {
+    val useServer by remember { derivedStateOf { viewModel.sharedPreferences.useServerModel } }
+    val hasInternet by remember { derivedStateOf { viewModel.networkChecker.isInternetAvailable() } }
+
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -149,6 +143,10 @@ fun LoadingState() {
     ) {
         CircularProgressIndicator()
         Text("Обработка...")
+
+        if (!useServer || !hasInternet) {
+            viewModel.snackbar()
+        }
     }
 }
 

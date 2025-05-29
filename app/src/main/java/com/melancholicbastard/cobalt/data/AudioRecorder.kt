@@ -179,22 +179,22 @@ class AudioRecorder(private val context: Context) {
 
         RandomAccessFile(file, "rw").use { raf ->
             // RIFF header
-            raf.write("RIFF".toByteArray())          // Chunk ID
+            raf.write("RIFF".toByteArray())             // Chunk ID
             raf.writeInt(0)                          // Chunk size (пока 0, обновится позже)
-            raf.write("WAVE".toByteArray())          // Format
+            raf.write("WAVE".toByteArray())             // Format
 
             // Format sub-chunk
-            raf.write("fmt ".toByteArray())          // Subchunk ID
+            raf.write("fmt ".toByteArray())             // Subchunk ID
             raf.writeInt(16)                         // Subchunk size (16 для PCM)
             raf.writeShort(1)                        // Audio format (1 = PCM)
-            raf.writeShort(channels)       // Channels
-            raf.writeInt(sampleRate)                 // Sample rate
-            raf.writeInt(byteRate)                   // Byte rate
-            raf.writeShort(blockAlign)     // Block align
-            raf.writeShort(bitsPerSample)  // Bits per sample
+            raf.writeShort(channels)                    // Channels
+            raf.writeInt(sampleRate)                    // Sample rate
+            raf.writeInt(byteRate)                      // Byte rate
+            raf.writeShort(blockAlign)                  // Block align
+            raf.writeShort(bitsPerSample)               // Bits per sample
 
             // Data sub-chunk
-            raf.write("data".toByteArray())          // Subchunk ID
+            raf.write("data".toByteArray())             // Subchunk ID
             raf.writeInt(0)                          // Data size (пока 0)
         }
     }
@@ -203,27 +203,11 @@ class AudioRecorder(private val context: Context) {
      * Останавливает запись и объединяет фрагменты для старых устройств
      * @return итоговый файл с полной записью
      */
-    fun stopRecording(): ProcessedAudio? {
+    fun stopRecording(): File? {
         stopInternal()
 
         return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N || pausedFiles.isEmpty()) {
-            // Новые Android или нет пауз - обрабатываем текущий WAV
-            outputFile?.let { wavFile ->
-                try {
-                    // 1. Распознавание текста
-                    val text = VoskModelManager.recognizeAudio(wavFile) ?: "Ошибка распознавания"
-                    Log.d("Text", text)
-                    // 2. Конвертация в AAC/MP4
-                    val mp4File = convertToAac(wavFile)
-                    // 3. Удаление временного WAV
-                    wavFile.delete()
-
-                    ProcessedAudio(mp4File, text)
-                } catch (e: Exception) {
-                    Log.e("AudioRecorder", "Ошибка при обработке файла", e)
-                    null
-                }
-            }
+            outputFile
         } else {
             // Старые Android с паузами - особый случай
             processLegacyRecording()
@@ -256,6 +240,8 @@ class AudioRecorder(private val context: Context) {
         }
     }
 
+
+
     /**
      * Обновляет заголовок WAV-файла, устанавливая корректные размеры данных.
      *
@@ -285,7 +271,7 @@ class AudioRecorder(private val context: Context) {
     }
 
     @Throws(IOException::class)
-    private fun convertToAac(wavFile: File): File {
+    fun convertToAac(wavFile: File): File {
         if (!wavFile.exists()) {
             throw IOException("WAV файл не найден: ${wavFile.absolutePath}")
         }
@@ -439,22 +425,15 @@ class AudioRecorder(private val context: Context) {
         }
     }
 
-    private fun processLegacyRecording(): ProcessedAudio {
+    private fun processLegacyRecording(): File {
         // 1. Объединяем WAV-фрагменты
         val mergedWav = mergeWavFiles(pausedFiles + outputFile!!)
 
-        // 2. Распознаем текст из объединенного WAV
-        val text = VoskModelManager.recognizeAudio(mergedWav) ?: "Ошибка распознавания"
-
-        // 3. Конвертируем в AAC/MP4
-        val mp4File = convertToAac(mergedWav)
-
-        // 4. Очистка
+        // 2. Очистка временных элементов аудио
         pausedFiles.forEach { it.delete() }
-        mergedWav.delete()
         pausedFiles.clear()
 
-        return ProcessedAudio(mp4File, text)
+        return mergedWav
     }
 
     /**
@@ -492,9 +471,4 @@ class AudioRecorder(private val context: Context) {
         outputFile = null
         pausedFiles.clear()
     }
-
-    data class ProcessedAudio(
-        val audioFile: File,
-        val transcript: String
-    )
 }
